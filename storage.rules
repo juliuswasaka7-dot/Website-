@@ -1,0 +1,70 @@
+rules_version = '2';
+service firebase.storage {
+  match /b/{bucket}/o {
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    function isMatchParticipant(matchId) {
+      return isSignedIn() && (
+        matchId.matches('^' + request.auth.uid + '_.*') ||
+        matchId.matches('.*_' + request.auth.uid + '$')
+      );
+    }
+
+    match /avatars/{userId}/{fileName} {
+      allow read: if isSignedIn();
+      allow write: if isSignedIn()
+        && request.auth.uid == userId
+        && request.resource.size < 5 * 1024 * 1024
+        && request.resource.contentType.matches('image/.*');
+      allow delete: if isSignedIn() && request.auth.uid == userId;
+    }
+
+    match /video_intros/{userId}/{fileName} {
+      allow read: if isSignedIn();
+      allow write: if isSignedIn()
+        && request.auth.uid == userId
+        && request.resource.size < 10 * 1024 * 1024
+        && request.resource.contentType.matches('video/.*');
+      allow delete: if isSignedIn() && request.auth.uid == userId;
+    }
+
+    match /private_albums/{userId}/{fileName} {
+      allow read: if isSignedIn();
+      allow write: if isSignedIn()
+        && request.auth.uid == userId
+        && request.resource.size < 5 * 1024 * 1024
+        && request.resource.contentType.matches('image/.*');
+      allow delete: if isSignedIn() && request.auth.uid == userId;
+    }
+
+    match /chat_audio/{matchId}/{fileName} {
+      allow read: if isMatchParticipant(matchId);
+      allow write: if isMatchParticipant(matchId)
+        && fileName.matches('^' + request.auth.uid + '_.*')
+        && request.resource.size < 2 * 1024 * 1024
+        && request.resource.contentType.matches('audio/.*');
+      allow delete: if isMatchParticipant(matchId)
+        && fileName.matches('^' + request.auth.uid + '_.*');
+    }
+
+    match /chat_attachments/{matchId}/{fileName} {
+      allow read: if isMatchParticipant(matchId);
+      allow write: if isMatchParticipant(matchId)
+        && fileName.matches('^' + request.auth.uid + '_.*')
+        && request.resource.size < 5 * 1024 * 1024
+        && (
+          request.resource.contentType.matches('image/.*') ||
+          request.resource.contentType == 'application/pdf' ||
+          request.resource.contentType == 'text/plain'
+        );
+      allow delete: if isMatchParticipant(matchId)
+        && fileName.matches('^' + request.auth.uid + '_.*');
+    }
+
+    match /{allPaths=**} {
+      allow read, write: if false;
+    }
+  }
+}

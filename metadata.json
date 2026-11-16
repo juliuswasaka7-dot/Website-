@@ -1,0 +1,6 @@
+{
+  "name": "FIND YOUR LOVE",
+  "description": "Two Countries, One Heart — International dating and friendship community connecting adults 18+ in Uganda, Jeddah, and worldwide.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

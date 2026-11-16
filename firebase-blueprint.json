@@ -1,0 +1,362 @@
+{
+  "entities": {
+    "PublicProfile": {
+      "title": "PublicProfile",
+      "description": "Public discovery profile for a registered adult member (18+). Contains zero PII (no email, full name, phone, or exact address).",
+      "type": "object",
+      "properties": {
+        "uid": { "type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "firstName": { "type": "string", "minLength": 1, "maxLength": 50 },
+        "age": { "type": "integer" },
+        "gender": { "type": "string", "enum": ["woman", "man", "non-binary", "prefer-not-to-say"] },
+        "country": { "type": "string", "minLength": 2, "maxLength": 80 },
+        "city": { "type": "string", "minLength": 1, "maxLength": 80 },
+        "photoUrl": { "type": "string", "minLength": 0, "maxLength": 1500 },
+        "intention": { "type": "string", "enum": ["dating", "friendship", "both"] },
+        "interests": { "type": "array" },
+        "bio": { "type": "string", "minLength": 0, "maxLength": 600 },
+        "emailVerified": { "type": "boolean" },
+        "blueVerified": { "type": "boolean" },
+        "visibility": { "type": "string", "enum": ["public", "matches_only", "hidden"] },
+        "membershipTier": { "type": "string", "enum": ["free", "premium"] },
+        "accountStatus": { "type": "string", "enum": ["active", "suspended"] },
+        "dailyLikesCount": { "type": "integer" },
+        "dailyLikesDate": { "type": "string", "minLength": 0, "maxLength": 20 },
+        "dailyMessagesCount": { "type": "integer" },
+        "dailyMessagesDate": { "type": "string", "minLength": 0, "maxLength": 20 },
+        "compatibilityAnswers": { "type": "array" },
+        "videoIntroUrl": { "type": "string", "minLength": 0, "maxLength": 1500 },
+        "privateAlbumCount": { "type": "integer" },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": [
+        "uid",
+        "firstName",
+        "age",
+        "gender",
+        "country",
+        "city",
+        "photoUrl",
+        "intention",
+        "interests",
+        "bio",
+        "emailVerified",
+        "visibility",
+        "membershipTier",
+        "accountStatus",
+        "dailyLikesCount",
+        "dailyLikesDate",
+        "createdAt",
+        "updatedAt"
+      ]
+    },
+    "FreeMembershipRecord": {
+      "title": "FreeMembershipRecord",
+      "description": "Separate record representing an active Free membership account.",
+      "type": "object",
+      "properties": {
+        "uid": { "type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "tier": { "type": "string", "enum": ["free"] },
+        "status": { "type": "string", "enum": ["active"] },
+        "dailyLikesLimit": { "type": "integer" },
+        "dailyMessagesLimit": { "type": "integer" },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["uid", "tier", "status", "dailyLikesLimit", "dailyMessagesLimit", "createdAt", "updatedAt"]
+    },
+    "PremiumMembershipRecord": {
+      "title": "PremiumMembershipRecord",
+      "description": "Separate admin-authorized record representing an active Premium membership account.",
+      "type": "object",
+      "properties": {
+        "uid": { "type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "tier": { "type": "string", "enum": ["premium"] },
+        "status": { "type": "string", "enum": ["active"] },
+        "grantedByAdminUid": { "type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "dailyLikesLimit": { "type": "integer" },
+        "dailyMessagesLimit": { "type": "integer" },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["uid", "tier", "status", "grantedByAdminUid", "dailyLikesLimit", "dailyMessagesLimit", "createdAt", "updatedAt"]
+    },
+    "PrivateAlbum": {
+      "title": "PrivateAlbum",
+      "description": "Premium private photo album visible to the owner, admins, and matched Premium members.",
+      "type": "object",
+      "properties": {
+        "uid": { "type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "photos": { "type": "array" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["uid", "photos", "updatedAt"]
+    },
+    "PrivateProfile": {
+      "title": "PrivateProfile",
+      "description": "Strictly isolated PII and private preferences accessible only by the account owner or administrator.",
+      "type": "object",
+      "properties": {
+        "uid": { "type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "fullName": { "type": "string", "minLength": 2, "maxLength": 100 },
+        "email": { "type": "string", "format": "email", "minLength": 3, "maxLength": 150 },
+        "dateOfBirth": { "type": "string", "minLength": 10, "maxLength": 10, "pattern": "^\\d{4}-\\d{2}-\\d{2}$" },
+        "showAge": { "type": "boolean" },
+        "allowFriendshipRequests": { "type": "boolean" },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": [
+        "uid",
+        "fullName",
+        "email",
+        "dateOfBirth",
+        "showAge",
+        "allowFriendshipRequests",
+        "createdAt",
+        "updatedAt"
+      ]
+    },
+    "LikeRecord": {
+      "title": "LikeRecord",
+      "description": "Directional like or pass interaction between two verified members.",
+      "type": "object",
+      "properties": {
+        "fromUid": { "type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "toUid": { "type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "action": { "type": "string", "enum": ["like", "pass"] },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["fromUid", "toUid", "action", "createdAt"]
+    },
+    "MatchRecord": {
+      "title": "MatchRecord",
+      "description": "Mutual match created only when both members have liked each other.",
+      "type": "object",
+      "properties": {
+        "participants": { "type": "array" },
+        "uidA": { "type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "uidB": { "type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "userAName": { "type": "string", "minLength": 1, "maxLength": 60 },
+        "userAPhoto": { "type": "string", "minLength": 0, "maxLength": 1500 },
+        "userBName": { "type": "string", "minLength": 1, "maxLength": 60 },
+        "userBPhoto": { "type": "string", "minLength": 0, "maxLength": 1500 },
+        "lastMessageText": { "type": "string", "minLength": 0, "maxLength": 500 },
+        "lastMessageAt": { "type": "string", "format": "date-time" },
+        "lastSenderUid": { "type": "string", "minLength": 0, "maxLength": 128 },
+        "unreadByUidA": { "type": "integer" },
+        "unreadByUidB": { "type": "integer" },
+        "status": { "type": "string", "enum": ["active", "unmatched"] },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": [
+        "participants",
+        "uidA",
+        "uidB",
+        "userAName",
+        "userAPhoto",
+        "userBName",
+        "userBPhoto",
+        "lastMessageText",
+        "lastMessageAt",
+        "lastSenderUid",
+        "unreadByUidA",
+        "unreadByUidB",
+        "status",
+        "createdAt",
+        "updatedAt"
+      ]
+    },
+    "ChatMessage": {
+      "title": "ChatMessage",
+      "description": "Real-time text, voice note, or attachment message inside a mutual match conversation.",
+      "type": "object",
+      "properties": {
+        "senderUid": { "type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "senderName": { "type": "string", "minLength": 1, "maxLength": 60 },
+        "senderPhoto": { "type": "string", "minLength": 0, "maxLength": 1500 },
+        "text": { "type": "string", "minLength": 0, "maxLength": 2000 },
+        "messageType": { "type": "string", "enum": ["text", "audio", "image", "file"] },
+        "audioUrl": { "type": "string", "minLength": 0, "maxLength": 1500 },
+        "audioDurationSec": { "type": "integer" },
+        "attachmentUrl": { "type": "string", "minLength": 0, "maxLength": 1500 },
+        "attachmentName": { "type": "string", "minLength": 0, "maxLength": 200 },
+        "attachmentMime": { "type": "string", "minLength": 0, "maxLength": 100 },
+        "storagePath": { "type": "string", "minLength": 0, "maxLength": 300 },
+        "readByRecipient": { "type": "boolean" },
+        "readAt": { "type": "string", "format": "date-time" },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["senderUid", "text", "readByRecipient", "createdAt"]
+    },
+    "PresenceStatus": {
+      "title": "PresenceStatus",
+      "description": "Lightweight member online/offline presence and last seen timestamp.",
+      "type": "object",
+      "properties": {
+        "uid": { "type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "isOnline": { "type": "boolean" },
+        "lastSeen": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["uid", "isOnline", "lastSeen", "updatedAt"]
+    },
+    "TypingStatus": {
+      "title": "TypingStatus",
+      "description": "Ephemeral typing indicator inside an active mutual match chat.",
+      "type": "object",
+      "properties": {
+        "uid": { "type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "isTyping": { "type": "boolean" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["uid", "isTyping", "updatedAt"]
+    },
+    "CallSession": {
+      "title": "CallSession",
+      "description": "WebRTC video call signaling session between matched members.",
+      "type": "object",
+      "properties": {
+        "callerUid": { "type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "calleeUid": { "type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "status": { "type": "string", "enum": ["ringing", "active", "ended", "declined", "missed"] },
+        "offerSdp": { "type": "string", "minLength": 0, "maxLength": 16000 },
+        "answerSdp": { "type": "string", "minLength": 0, "maxLength": 16000 },
+        "callerCandidates": { "type": "array" },
+        "calleeCandidates": { "type": "array" },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["callerUid", "calleeUid", "status", "offerSdp", "answerSdp", "callerCandidates", "calleeCandidates", "createdAt", "updatedAt"]
+    },
+    "BlockRecord": {
+      "title": "BlockRecord",
+      "description": "Member-initiated block record hiding and restricting contact from another user.",
+      "type": "object",
+      "properties": {
+        "blockerUid": { "type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "blockedUid": { "type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["blockerUid", "blockedUid", "createdAt"]
+    },
+    "SafetyReport": {
+      "title": "SafetyReport",
+      "description": "Safety report submitted by a verified member for admin review.",
+      "type": "object",
+      "properties": {
+        "reporterUid": { "type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "reportedUid": { "type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "category": { "type": "string", "enum": ["scam_money", "inappropriate_photo", "harassment", "fake_profile", "underage", "other"] },
+        "contextType": { "type": "string", "enum": ["profile", "message", "photo"] },
+        "contextId": { "type": "string", "minLength": 0, "maxLength": 200 },
+        "details": { "type": "string", "minLength": 5, "maxLength": 1000 },
+        "status": { "type": "string", "enum": ["open", "reviewed", "resolved"] },
+        "adminNote": { "type": "string", "minLength": 0, "maxLength": 500 },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": [
+        "reporterUid",
+        "reportedUid",
+        "category",
+        "contextType",
+        "contextId",
+        "details",
+        "status",
+        "adminNote",
+        "createdAt",
+        "updatedAt"
+      ]
+    },
+    "CommunityStats": {
+      "title": "CommunityStats",
+      "description": "Aggregate non-PII community counters displayed on the homepage.",
+      "type": "object",
+      "properties": {
+        "totalMembers": { "type": "integer" },
+        "ugandaMembers": { "type": "integer" },
+        "jeddahMembers": { "type": "integer" },
+        "otherMembers": { "type": "integer" },
+        "totalMatches": { "type": "integer" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["totalMembers", "ugandaMembers", "jeddahMembers", "otherMembers", "totalMatches", "updatedAt"]
+    },
+    "AdminRecord": {
+      "title": "AdminRecord",
+      "description": "Administrator role marker document.",
+      "type": "object",
+      "properties": {
+        "uid": { "type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "role": { "type": "string", "enum": ["admin"] },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["uid", "role", "createdAt"]
+    }
+  },
+  "firestore": {
+    "/profiles/{userId}": {
+      "schema": { "$ref": "#/entities/PublicProfile" },
+      "description": "Public discovery profiles without PII."
+    },
+    "/freeMemberships/{userId}": {
+      "schema": { "$ref": "#/entities/FreeMembershipRecord" },
+      "description": "Separate collection tracking active Free membership accounts."
+    },
+    "/premiumMemberships/{userId}": {
+      "schema": { "$ref": "#/entities/PremiumMembershipRecord" },
+      "description": "Separate admin-controlled collection tracking active Premium membership accounts."
+    },
+    "/privateAlbums/{userId}": {
+      "schema": { "$ref": "#/entities/PrivateAlbum" },
+      "description": "Premium private photo albums accessible to owner, admins, and matched Premium members."
+    },
+    "/privateProfiles/{userId}": {
+      "schema": { "$ref": "#/entities/PrivateProfile" },
+      "description": "Owner/admin isolated PII records."
+    },
+    "/likes/{likeId}": {
+      "schema": { "$ref": "#/entities/LikeRecord" },
+      "description": "Directional likes and passes keyed as {fromUid}_{toUid}."
+    },
+    "/matches/{matchId}": {
+      "schema": { "$ref": "#/entities/MatchRecord" },
+      "description": "Mutual matches keyed as sorted {uidA}_{uidB}."
+    },
+    "/presence/{userId}": {
+      "schema": { "$ref": "#/entities/PresenceStatus" },
+      "description": "Online/offline presence and last seen timestamps readable only by matched partners, owner, or admin."
+    },
+    "/matches/{matchId}/messages/{messageId}": {
+      "schema": { "$ref": "#/entities/ChatMessage" },
+      "description": "Real-time text, voice notes, and attachments between matched users."
+    },
+    "/matches/{matchId}/typing/{userId}": {
+      "schema": { "$ref": "#/entities/TypingStatus" },
+      "description": "Ephemeral typing indicator state per participant inside a match conversation."
+    },
+    "/matches/{matchId}/calls/{callId}": {
+      "schema": { "$ref": "#/entities/CallSession" },
+      "description": "WebRTC video call signaling sessions between matched members."
+    },
+    "/blocks/{blockId}": {
+      "schema": { "$ref": "#/entities/BlockRecord" },
+      "description": "Member block records keyed as {blockerUid}_{blockedUid}."
+    },
+    "/reports/{reportId}": {
+      "schema": { "$ref": "#/entities/SafetyReport" },
+      "description": "Moderation and safety reports."
+    },
+    "/stats/{statId}": {
+      "schema": { "$ref": "#/entities/CommunityStats" },
+      "description": "Aggregate public statistics document."
+    },
+    "/admins/{adminUid}": {
+      "schema": { "$ref": "#/entities/AdminRecord" },
+      "description": "Administrator allowlist."
+    }
+  }
+}
