@@ -7,15 +7,15 @@ import { DataSaverProvider } from './context/DataSaverContext.tsx';
 import './index.css';
 
 if (typeof window !== 'undefined' && 'serviceWorker' in navigator) {
-  const { hostname } = window.location;
-  const isPreviewOrDevHost =
-    import.meta.env.DEV ||
+  const { hostname, protocol } = window.location;
+  const isPreviewOrLocalHost =
+    protocol !== 'https:' ||
     hostname === 'localhost' ||
     hostname === '127.0.0.1' ||
     hostname.endsWith('.run.app') ||
     hostname.includes('aistudio.google.com');
 
-  if (isPreviewOrDevHost) {
+  if (isPreviewOrLocalHost) {
     // Clean up any stale preview/dev service workers that can stall applet loading
     navigator.serviceWorker
       .getRegistrations()

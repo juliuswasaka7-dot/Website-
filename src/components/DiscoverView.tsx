@@ -37,9 +37,10 @@ import {
   type ViewRoute,
 } from '../types/app';
 import { Avatar } from './Avatar';
-import { MemberBadges } from './MemberBadges';
-import { ReportModal } from './ReportModal';
 import { InstallAppButton } from './InstallAppButton';
+import { MemberBadges } from './MemberBadges';
+import { MemberProfileModal } from './MemberProfileModal';
+import { ReportModal } from './ReportModal';
 
 interface DiscoverViewProps {
   onNavigate: (route: ViewRoute) => void;
@@ -89,6 +90,10 @@ export function DiscoverView({ onNavigate }: DiscoverViewProps) {
   const [videoIntroTarget, setVideoIntroTarget] = useState<PublicProfile | null>(
     null
   );
+  const [inspectTarget, setInspectTarget] = useState<{
+    member: PublicProfile;
+    score: number;
+  } | null>(null);
   const [expandedCompatUid, setExpandedCompatUid] = useState<string | null>(null);
 
   // Filters
@@ -832,7 +837,12 @@ export function DiscoverView({ onNavigate }: DiscoverViewProps) {
                   className="cv-auto bg-white rounded-2xl border border-purple-950/10 overflow-hidden flex flex-col justify-between"
                 >
                   <div>
-                    <div className="aspect-[4/3] bg-purple-950 relative overflow-hidden">
+                    <div
+                      className="aspect-[4/3] bg-purple-950 relative overflow-hidden cursor-pointer group"
+                      onClick={() =>
+                        setInspectTarget({ member, score: compat.score })
+                      }
+                    >
                       <Avatar
                         src={member.photoUrl}
                         name={member.firstName}
@@ -844,6 +854,16 @@ export function DiscoverView({ onNavigate }: DiscoverViewProps) {
                         <Sparkles className="w-3 h-3 text-pink-300" />
                         <span>{compat.score}% Match</span>
                       </span>
+                      <button
+                        type="button"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          setInspectTarget({ member, score: compat.score });
+                        }}
+                        className="absolute bottom-2.5 left-2.5 min-h-[34px] px-3 py-1 rounded-full bg-black/65 hover:bg-black/80 text-white text-[11px] font-semibold transition-colors"
+                      >
+                        View Profile
+                      </button>
                     </div>
 
                     <div className="p-5">
@@ -1114,6 +1134,36 @@ export function DiscoverView({ onNavigate }: DiscoverViewProps) {
             setActionFeedback(
               'Thank you. Your safety report has been received by our moderation team.'
             );
+          }}
+        />
+      )}
+
+      {/* Full Member Profile Modal (shows Profile Cover + Avatar + Details) */}
+      {inspectTarget && (
+        <MemberProfileModal
+          member={inspectTarget.member}
+          matchScore={inspectTarget.score}
+          actionBusy={actionBusyUid === inspectTarget.member.uid}
+          onClose={() => setInspectTarget(null)}
+          onLike={() => {
+            const target = inspectTarget.member;
+            setInspectTarget(null);
+            void handleLikeOrPass(target, 'like');
+          }}
+          onPass={() => {
+            const target = inspectTarget.member;
+            setInspectTarget(null);
+            void handleLikeOrPass(target, 'pass');
+          }}
+          onReport={() => {
+            const target = inspectTarget.member;
+            setInspectTarget(null);
+            setReportTarget(target);
+          }}
+          onBlock={() => {
+            const target = inspectTarget.member;
+            setInspectTarget(null);
+            void handleBlock(target);
           }}
         />
       )}

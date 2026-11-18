@@ -23,6 +23,7 @@ export interface PublicProfile {
   country: string;
   city: string;
   photoUrl: string;
+  coverUrl?: string;
   intention: IntentionOption;
   interests: string[];
   bio: string;
@@ -69,6 +70,8 @@ export interface PrivateAlbum {
   updatedAt: unknown;
 }
 
+export type PresencePrivacy = 'everyone' | 'matches_only' | 'nobody';
+
 export interface PrivateProfile {
   uid: string;
   fullName: string;
@@ -76,6 +79,7 @@ export interface PrivateProfile {
   dateOfBirth: string;
   showAge: boolean;
   allowFriendshipRequests: boolean;
+  onlineStatusPrivacy?: PresencePrivacy;
   createdAt: unknown;
   updatedAt: unknown;
 }
@@ -112,9 +116,11 @@ export interface ChatMessage {
   senderName?: string;
   senderPhoto?: string;
   text: string;
-  messageType?: 'text' | 'audio' | 'image' | 'file';
+  messageType?: 'text' | 'audio' | 'video' | 'image' | 'file';
   audioUrl?: string;
   audioDurationSec?: number;
+  videoUrl?: string;
+  videoDurationSec?: number;
   attachmentUrl?: string;
   attachmentName?: string;
   attachmentMime?: string;
@@ -128,12 +134,15 @@ export interface ChatMessage {
 export interface PresenceStatus {
   uid: string;
   isOnline: boolean;
+  privacyMode?: PresencePrivacy;
   lastSeen: unknown;
   updatedAt: unknown;
 }
 
 export interface TypingStatus {
+  matchId?: string;
   uid: string;
+  recipientUid?: string;
   isTyping: boolean;
   updatedAt: unknown;
 }
@@ -142,6 +151,7 @@ export interface CallSession {
   id: string;
   callerUid: string;
   calleeUid: string;
+  callType?: 'video' | 'audio';
   status: 'ringing' | 'active' | 'ended' | 'declined' | 'missed';
   offerSdp: string;
   answerSdp: string;

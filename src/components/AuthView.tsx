@@ -18,7 +18,7 @@ import {
 } from 'react';
 import { useAuth } from '../context/AuthContext';
 import { useDataSaver } from '../context/DataSaverContext';
-import { uploadProfilePhoto } from '../services/storageService';
+import { uploadImage, validateImageFile } from '../services/imageService';
 import {
   calculateAgeFromDob,
   CITY_SUGGESTIONS,
@@ -141,8 +141,14 @@ export function AuthView({ initialMode = 'login', onSuccess }: AuthViewProps) {
   const handlePhotoChange = (e: ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
-    if (!file.type.startsWith('image/')) {
-      setError('Please select a JPG, PNG, or WebP image.');
+    try {
+      validateImageFile(file);
+    } catch (err) {
+      setError(
+        err instanceof Error
+          ? err.message
+          : 'Please select a JPG, JPEG, PNG, or WEBP image.'
+      );
       return;
     }
     setError(null);
@@ -299,12 +305,14 @@ export function AuthView({ initialMode = 'login', onSuccess }: AuthViewProps) {
           setStatusLabel('Uploading photo...');
           setUploadProgress(0);
           try {
-            photoUrl = await uploadProfilePhoto(
-              user.uid,
-              photoFile,
-              setUploadProgress,
-              dataSaver
-            );
+            const uploaded = await uploadImage(photoFile, {
+              uid: user.uid,
+              type: 'avatar',
+              onProgress: setUploadProgress,
+              dataSaver,
+              updateFirestore: false,
+            });
+            photoUrl = uploaded.url;
           } catch (uploadErr) {
             setInfoMessage(
               uploadErr instanceof Error
@@ -345,28 +353,15 @@ export function AuthView({ initialMode = 'login', onSuccess }: AuthViewProps) {
       if (photoFile) {
         setStatusLabel('Uploading photo...');
         const { auth } = await import('../lib/firebase');
-        const { updateMyPublicProfile } = await import('../services/datingService');
         if (auth.currentUser) {
           setUploadProgress(0);
           try {
-            const uploadedUrl = await uploadProfilePhoto(
-              auth.currentUser.uid,
-              photoFile,
-              setUploadProgress,
-              dataSaver
-            );
-            await updateMyPublicProfile(auth.currentUser.uid, {
-              firstName: fullName.trim().split(/\s+/)[0] || 'Member',
-              age: calculatedAge,
-              gender,
-              country: effectiveCountry,
-              city: city.trim(),
-              photoUrl: uploadedUrl,
-              intention,
-              interests,
-              bio,
-              visibility: 'public',
-              emailVerified: auth.currentUser.emailVerified,
+            await uploadImage(photoFile, {
+              uid: auth.currentUser.uid,
+              type: 'avatar',
+              onProgress: setUploadProgress,
+              dataSaver,
+              updateFirestore: true,
             });
           } catch (uploadErr) {
             setInfoMessage(
@@ -934,7 +929,7 @@ export function AuthView({ initialMode = 'login', onSuccess }: AuthViewProps) {
                       <input
                         id="reg-photo"
                         type="file"
-                        accept="image/*"
+                        accept="image/jpeg,image/jpg,image/png,image/webp,image/*"
                         onChange={handlePhotoChange}
                         className="block w-full text-xs text-purple-950/70 file:mr-3 file:py-1.5 file:px-3 file:rounded-lg file:border-0 file:text-xs file:font-semibold file:bg-purple-950/10 file:text-[#2E1065]"
                       />

@@ -59,6 +59,8 @@ function createCachedFirestore(): Firestore {
 export const db = createCachedFirestore();
 export const auth = createPersistentAuth();
 export const storage = getStorage(app);
+storage.maxUploadRetryTime = 15000;
+storage.maxOperationRetryTime = 10000;
 
 export async function ensureLocalPersistence(): Promise<void> {
   try {

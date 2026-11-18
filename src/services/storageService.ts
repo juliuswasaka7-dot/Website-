@@ -5,22 +5,34 @@ import {
   uploadBytesResumable,
 } from 'firebase/storage';
 import { storage } from '../lib/firebase';
+import {
+  compressImageToDataUrl,
+  isFirebaseStorageAvailable,
+} from './imageService';
 
 const MAX_UPLOAD_BYTES = 5 * 1024 * 1024;
 const MAX_VIDEO_BYTES = 10 * 1024 * 1024;
 const MAX_AUDIO_BYTES = 2 * 1024 * 1024;
 const UPLOAD_STALL_TIMEOUT_MS = 20000;
 
-async function compressImageToJpeg(
-  file: File,
-  dataSaver: boolean
-): Promise<Blob> {
-  if (!file.type.startsWith('image/')) {
-    throw new Error('Please choose a valid image file (JPG, PNG, or WebP).');
+export function validateImageFile(file: File): void {
+  const nameLower = (file.name || '').toLowerCase();
+  const hasImageExt = /\.(jpe?g|png|webp|gif|bmp|heic|heif)$/i.test(nameLower);
+  const isSvg = file.type === 'image/svg+xml' || nameLower.endsWith('.svg');
+
+  if (isSvg || (!file.type.startsWith('image/') && !hasImageExt)) {
+    throw new Error('Please choose a valid photo from your gallery (JPG, PNG, or WebP).');
   }
   if (file.size > 15 * 1024 * 1024) {
     throw new Error('Image is too large. Please select a photo under 15 MB.');
   }
+}
+
+async function compressImageToJpeg(
+  file: File,
+  dataSaver: boolean
+): Promise<Blob> {
+  validateImageFile(file);
 
   const maxDimension = dataSaver ? 480 : 720;
   const jpegQuality = dataSaver ? 0.68 : 0.8;
@@ -96,6 +108,12 @@ function runResumableUpload(
   contentType: string,
   onProgress?: (percent: number) => void
 ): Promise<string> {
+  if (typeof navigator !== 'undefined' && navigator.onLine === false) {
+    return Promise.reject(
+      new Error('You appear to be offline. Connect to the internet and try again.')
+    );
+  }
+
   const storageRef = ref(storage, storagePath);
 
   return new Promise((resolve, reject) => {
@@ -104,33 +122,58 @@ function runResumableUpload(
       cacheControl: 'public,max-age=86400',
     });
 
-    let lastBytes = -1;
+    const startedAt = Date.now();
+    let lastBytes = 0;
+    let lastProgressAt = startedAt;
     let settled = false;
-    const stallTimer = window.setInterval(() => {
-      if (settled) return;
-      const currentBytes = task.snapshot.bytesTransferred;
-      if (currentBytes === lastBytes) {
-        settled = true;
-        window.clearInterval(stallTimer);
-        task.cancel();
-        reject(
-          new Error(
-            'Upload timed out on a slow connection. Please retry when signal improves.'
-          )
-        );
-      } else {
-        lastBytes = currentBytes;
-      }
-    }, UPLOAD_STALL_TIMEOUT_MS);
 
     const cleanup = () => {
       settled = true;
       window.clearInterval(stallTimer);
     };
 
+    const failAndCancel = (message: string) => {
+      if (settled) return;
+      cleanup();
+      try {
+        task.cancel();
+      } catch {
+        // Ignore if already canceled/errored
+      }
+      reject(new Error(message));
+    };
+
+    const stallTimer = window.setInterval(() => {
+      if (settled) return;
+      const now = Date.now();
+      const currentBytes = task.snapshot.bytesTransferred;
+      if (currentBytes > lastBytes) {
+        lastBytes = currentBytes;
+        lastProgressAt = now;
+        return;
+      }
+      const idleMs = now - lastProgressAt;
+      if (currentBytes === 0 && idleMs >= 12000) {
+        failAndCancel(
+          'Upload could not start (0% timeout). Verify Firebase Storage is enabled and retry.'
+        );
+        return;
+      }
+      if (idleMs >= UPLOAD_STALL_TIMEOUT_MS || now - startedAt >= 45000) {
+        failAndCancel(
+          'Upload timed out on a slow connection. Please retry when signal improves.'
+        );
+      }
+    }, 4000);
+
     task.on(
       'state_changed',
       (snapshot) => {
+        if (settled) return;
+        if (snapshot.bytesTransferred > lastBytes) {
+          lastBytes = snapshot.bytesTransferred;
+          lastProgressAt = Date.now();
+        }
         if (snapshot.totalBytes > 0 && onProgress) {
           const pct = Math.round(
             (snapshot.bytesTransferred / snapshot.totalBytes) * 100
@@ -141,11 +184,16 @@ function runResumableUpload(
       (error) => {
         if (settled) return;
         cleanup();
-        const code = (error as { code?: string }).code || '';
+        const errObj = error as { code?: string; serverResponse?: string };
+        const code = errObj.code || '';
+        const serverResp = errObj.serverResponse || '';
         if (
           code === 'storage/unauthorized' ||
           code === 'storage/bucket-not-found' ||
-          code === 'storage/unknown'
+          code === 'storage/project-not-found' ||
+          code === 'storage/retry-limit-exceeded' ||
+          code === 'storage/unknown' ||
+          serverResp.includes('"code": 404')
         ) {
           reject(
             new Error(
@@ -189,19 +237,70 @@ export async function uploadProfilePhoto(
   );
 }
 
+export async function uploadCroppedProfileImage(
+  uid: string,
+  kind: 'avatar' | 'cover',
+  croppedBlob: Blob,
+  onProgress?: (percent: number) => void
+): Promise<string> {
+  if (croppedBlob.size > MAX_UPLOAD_BYTES) {
+    throw new Error('Cropped image exceeds the 5 MB upload limit. Please zoom or choose a smaller photo.');
+  }
+  const fileName = `${kind}_${Date.now()}.jpg`;
+  return runResumableUpload(
+    `avatars/${uid}/${fileName}`,
+    croppedBlob,
+    'image/jpeg',
+    onProgress
+  );
+}
+
+export async function deleteStorageFileByUrl(
+  downloadUrl?: string | null
+): Promise<void> {
+  if (!downloadUrl || typeof downloadUrl !== 'string') return;
+  try {
+    if (!downloadUrl.includes('firebasestorage.googleapis.com')) return;
+    const match = downloadUrl.match(/\/o\/([^?]+)/);
+    if (!match?.[1]) return;
+    const objectPath = decodeURIComponent(match[1]);
+    if (
+      !objectPath.startsWith('avatars/') &&
+      !objectPath.startsWith('covers/')
+    ) {
+      return;
+    }
+    await deleteObject(ref(storage, objectPath));
+  } catch {
+    // Non-fatal cleanup if file already removed or owned elsewhere
+  }
+}
+
 export async function uploadPrivateAlbumPhoto(
   uid: string,
   file: File,
   onProgress?: (percent: number) => void,
   dataSaver = false
 ): Promise<string> {
-  const compressedBlob = await compressImageToJpeg(file, dataSaver);
-  return runResumableUpload(
-    `private_albums/${uid}/${Date.now()}.jpg`,
-    compressedBlob,
-    'image/jpeg',
-    onProgress
-  );
+  if (await isFirebaseStorageAvailable()) {
+    const compressedBlob = await compressImageToJpeg(file, dataSaver);
+    return runResumableUpload(
+      `private_albums/${uid}/${Date.now()}.jpg`,
+      compressedBlob,
+      'image/jpeg',
+      onProgress
+    );
+  }
+  if (onProgress) onProgress(0);
+  const { dataUrl } = await compressImageToDataUrl(file, {
+    maxWidth: dataSaver ? 480 : 640,
+    maxHeight: dataSaver ? 480 : 640,
+    maxChars: 170000,
+    initialQuality: dataSaver ? 0.72 : 0.82,
+    label: 'privateAlbum',
+  });
+  if (onProgress) onProgress(100);
+  return dataUrl;
 }
 
 export async function uploadVideoIntro(
@@ -224,6 +323,34 @@ export async function uploadVideoIntro(
   );
 }
 
+function blobToDataUrl(
+  blob: Blob,
+  onProgress?: (percent: number) => void
+): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onprogress = (e) => {
+      if (e.lengthComputable && e.total > 0 && onProgress) {
+        onProgress(Math.min(95, Math.round((e.loaded / e.total) * 100)));
+      }
+    };
+    reader.onload = () => {
+      const result = typeof reader.result === 'string' ? reader.result : '';
+      if (!result) {
+        reject(new Error('Failed to encode recorded media. Please try again.'));
+        return;
+      }
+      if (onProgress) onProgress(100);
+      resolve(result);
+    };
+    reader.onerror = () => {
+      reject(new Error('Could not read recorded media on this device.'));
+    };
+    if (onProgress) onProgress(10);
+    reader.readAsDataURL(blob);
+  });
+}
+
 export async function uploadVoiceMessage(
   matchId: string,
   uid: string,
@@ -235,9 +362,60 @@ export async function uploadVoiceMessage(
   }
   const mime = blob.type || 'audio/webm';
   const ext = mime.includes('mp4') ? 'm4a' : mime.includes('ogg') ? 'ogg' : 'webm';
-  const storagePath = `chat_audio/${matchId}/${uid}_${Date.now()}.${ext}`;
-  const url = await runResumableUpload(storagePath, blob, mime, onProgress);
-  return { url, storagePath };
+
+  if (await isFirebaseStorageAvailable()) {
+    const storagePath = `chat_audio/${matchId}/${uid}_${Date.now()}.${ext}`;
+    const url = await runResumableUpload(storagePath, blob, mime, onProgress);
+    return { url, storagePath };
+  }
+
+  if (blob.size > 350 * 1024) {
+    throw new Error(
+      'Voice message is too large to store directly (keep under 45 seconds or speak closer to the mic).'
+    );
+  }
+  const dataUrl = await blobToDataUrl(blob, onProgress);
+  if (dataUrl.length > 490_000) {
+    throw new Error(
+      'Voice message exceeded direct message size limit. Please send a shorter voice note.'
+    );
+  }
+  return { url: dataUrl, storagePath: '' };
+}
+
+export async function uploadVideoMessage(
+  matchId: string,
+  uid: string,
+  blob: Blob,
+  onProgress?: (percent: number) => void
+): Promise<{ url: string; storagePath: string }> {
+  if (blob.size === 0) {
+    throw new Error('Recorded video is empty. Please record again.');
+  }
+  const mime = blob.type || 'video/webm';
+  const ext = mime.includes('mp4') ? 'mp4' : 'webm';
+
+  if (await isFirebaseStorageAvailable()) {
+    if (blob.size > MAX_VIDEO_BYTES) {
+      throw new Error('Video message must be 10 MB or smaller.');
+    }
+    const storagePath = `chat_video/${matchId}/${uid}_${Date.now()}.${ext}`;
+    const url = await runResumableUpload(storagePath, blob, mime, onProgress);
+    return { url, storagePath };
+  }
+
+  if (blob.size > 540 * 1024) {
+    throw new Error(
+      'Video message is too large. Please keep video clips short (up to 15 seconds).'
+    );
+  }
+  const dataUrl = await blobToDataUrl(blob, onProgress);
+  if (dataUrl.length > 740_000) {
+    throw new Error(
+      'Video message exceeded direct message size limit. Please record a slightly shorter clip.'
+    );
+  }
+  return { url: dataUrl, storagePath: '' };
 }
 
 export async function uploadChatAttachment(
@@ -253,14 +431,37 @@ export async function uploadChatAttachment(
   attachmentMime: string;
   messageType: 'image' | 'file';
 }> {
-  const isImage = file.type.startsWith('image/');
+  const nameLower = (file.name || '').toLowerCase();
+  const isImage =
+    file.type.startsWith('image/') ||
+    /\.(jpe?g|png|webp|gif|bmp)$/i.test(nameLower);
   const isPdfOrText =
     file.type === 'application/pdf' || file.type === 'text/plain';
 
   if (!isImage && !isPdfOrText) {
     throw new Error(
-      'Supported attachments are images (JPG, PNG, WebP), PDF, and TXT files.'
+      'Supported attachments are images (JPG, JPEG, PNG, WEBP), PDF, and TXT files.'
     );
+  }
+
+  if (isImage && !(await isFirebaseStorageAvailable())) {
+    if (onProgress) onProgress(0);
+    const { dataUrl, mimeType } = await compressImageToDataUrl(file, {
+      maxWidth: dataSaver ? 560 : 800,
+      maxHeight: dataSaver ? 560 : 800,
+      maxChars: 200000,
+      initialQuality: dataSaver ? 0.72 : 0.82,
+      label: 'chatImage',
+    });
+    if (onProgress) onProgress(100);
+    const ext = mimeType === 'image/webp' ? 'webp' : 'jpg';
+    return {
+      url: dataUrl,
+      storagePath: '',
+      attachmentName: file.name.slice(0, 200) || `photo.${ext}`,
+      attachmentMime: mimeType,
+      messageType: 'image',
+    };
   }
 
   let payload: Blob = file;

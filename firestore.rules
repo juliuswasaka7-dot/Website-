@@ -65,7 +65,7 @@ service cloud.firestore {
         ]) &&
         data.keys().hasOnly([
           'uid', 'firstName', 'age', 'gender', 'country', 'city',
-          'photoUrl', 'intention', 'interests', 'bio', 'emailVerified',
+          'photoUrl', 'coverUrl', 'intention', 'interests', 'bio', 'emailVerified',
           'blueVerified', 'visibility', 'membershipTier', 'accountStatus',
           'dailyLikesCount', 'dailyLikesDate', 'dailyMessagesCount',
           'dailyMessagesDate', 'compatibilityAnswers', 'videoIntroUrl',
@@ -77,7 +77,8 @@ service cloud.firestore {
         data.gender in ['woman', 'man', 'non-binary', 'prefer-not-to-say'] &&
         data.country is string && data.country.size() >= 2 && data.country.size() <= 80 &&
         data.city is string && data.city.size() >= 1 && data.city.size() <= 80 &&
-        data.photoUrl is string && data.photoUrl.size() <= 1500 &&
+        data.photoUrl is string && data.photoUrl.size() <= 140000 &&
+        (!('coverUrl' in data) || (data.coverUrl is string && data.coverUrl.size() <= 240000)) &&
         data.intention in ['dating', 'friendship', 'both'] &&
         data.interests is list && data.interests.size() <= 10 &&
         (data.interests.size() == 0 || data.interests[0] is string) &&
@@ -140,7 +141,10 @@ service cloud.firestore {
         data.keys().hasOnly(['uid', 'photos', 'updatedAt']) &&
         isValidId(data.uid) &&
         data.photos is list && data.photos.size() <= 4 &&
-        (data.photos.size() == 0 || (data.photos[0] is string && data.photos[0].size() <= 1500)) &&
+        (data.photos.size() < 1 || (data.photos[0] is string && data.photos[0].size() <= 180000)) &&
+        (data.photos.size() < 2 || (data.photos[1] is string && data.photos[1].size() <= 180000)) &&
+        (data.photos.size() < 3 || (data.photos[2] is string && data.photos[2].size() <= 180000)) &&
+        (data.photos.size() < 4 || (data.photos[3] is string && data.photos[3].size() <= 180000)) &&
         data.updatedAt is timestamp;
     }
 
@@ -151,7 +155,8 @@ service cloud.firestore {
         ]) &&
         data.keys().hasOnly([
           'uid', 'fullName', 'email', 'dateOfBirth',
-          'showAge', 'allowFriendshipRequests', 'createdAt', 'updatedAt'
+          'showAge', 'allowFriendshipRequests', 'onlineStatusPrivacy',
+          'createdAt', 'updatedAt'
         ]) &&
         isValidId(data.uid) &&
         data.fullName is string && data.fullName.size() >= 2 && data.fullName.size() <= 100 &&
@@ -160,6 +165,7 @@ service cloud.firestore {
         data.dateOfBirth.matches('^\\d{4}-\\d{2}-\\d{2}$') &&
         data.showAge is bool &&
         data.allowFriendshipRequests is bool &&
+        (!('onlineStatusPrivacy' in data) || data.onlineStatusPrivacy in ['everyone', 'matches_only', 'nobody']) &&
         data.createdAt is timestamp &&
         data.updatedAt is timestamp;
     }
@@ -193,9 +199,9 @@ service cloud.firestore {
         data.uidA < data.uidB &&
         data.participants[0] == data.uidA && data.participants[1] == data.uidB &&
         data.userAName is string && data.userAName.size() >= 1 && data.userAName.size() <= 60 &&
-        data.userAPhoto is string && data.userAPhoto.size() <= 1500 &&
+        data.userAPhoto is string && data.userAPhoto.size() <= 140000 &&
         data.userBName is string && data.userBName.size() >= 1 && data.userBName.size() <= 60 &&
-        data.userBPhoto is string && data.userBPhoto.size() <= 1500 &&
+        data.userBPhoto is string && data.userBPhoto.size() <= 140000 &&
         data.lastMessageText is string && data.lastMessageText.size() <= 500 &&
         data.lastMessageAt is timestamp &&
         data.lastSenderUid is string && data.lastSenderUid.size() <= 128 &&
@@ -210,22 +216,26 @@ service cloud.firestore {
       return data.keys().hasAll(['senderUid', 'text', 'readByRecipient', 'createdAt']) &&
         data.keys().hasOnly([
           'senderUid', 'senderName', 'senderPhoto', 'text', 'messageType',
-          'audioUrl', 'audioDurationSec', 'attachmentUrl', 'attachmentName',
+          'audioUrl', 'audioDurationSec', 'videoUrl', 'videoDurationSec',
+          'attachmentUrl', 'attachmentName',
           'attachmentMime', 'storagePath', 'readByRecipient', 'readAt', 'createdAt'
         ]) &&
         isValidId(data.senderUid) &&
         (!('senderName' in data) || (data.senderName is string && data.senderName.size() >= 1 && data.senderName.size() <= 60)) &&
         (!('senderPhoto' in data) || (data.senderPhoto is string && data.senderPhoto.size() <= 1500)) &&
         data.text is string && data.text.size() <= 2000 &&
-        (!('messageType' in data) || data.messageType in ['text', 'audio', 'image', 'file']) &&
-        (!('audioUrl' in data) || (data.audioUrl is string && data.audioUrl.size() <= 1500)) &&
+        (!('messageType' in data) || data.messageType in ['text', 'audio', 'video', 'image', 'file']) &&
+        (!('audioUrl' in data) || (data.audioUrl is string && data.audioUrl.size() <= 500000)) &&
         (!('audioDurationSec' in data) || (data.audioDurationSec is int && data.audioDurationSec >= 0 && data.audioDurationSec <= 180)) &&
-        (!('attachmentUrl' in data) || (data.attachmentUrl is string && data.attachmentUrl.size() <= 1500)) &&
+        (!('videoUrl' in data) || (data.videoUrl is string && data.videoUrl.size() <= 750000)) &&
+        (!('videoDurationSec' in data) || (data.videoDurationSec is int && data.videoDurationSec >= 0 && data.videoDurationSec <= 180)) &&
+        (!('attachmentUrl' in data) || (data.attachmentUrl is string && data.attachmentUrl.size() <= 220000)) &&
         (!('attachmentName' in data) || (data.attachmentName is string && data.attachmentName.size() <= 200)) &&
         (!('attachmentMime' in data) || (data.attachmentMime is string && data.attachmentMime.size() <= 100)) &&
         (!('storagePath' in data) || (data.storagePath is string && data.storagePath.size() <= 300)) &&
         (
           (('messageType' in data) && data.messageType == 'audio' && ('audioUrl' in data) && data.audioUrl.size() > 0) ||
+          (('messageType' in data) && data.messageType == 'video' && ('videoUrl' in data) && data.videoUrl.size() > 0) ||
           (('messageType' in data) && data.messageType in ['image', 'file'] && ('attachmentUrl' in data) && data.attachmentUrl.size() > 0) ||
           data.text.size() >= 1
         ) &&
@@ -236,11 +246,22 @@ service cloud.firestore {
 
     function isValidPresence(data) {
       return data.keys().hasAll(['uid', 'isOnline', 'lastSeen', 'updatedAt']) &&
-        data.keys().hasOnly(['uid', 'isOnline', 'lastSeen', 'updatedAt']) &&
+        data.keys().hasOnly(['uid', 'isOnline', 'privacyMode', 'lastSeen', 'updatedAt']) &&
         isValidId(data.uid) &&
         data.isOnline is bool &&
+        (!('privacyMode' in data) || data.privacyMode in ['everyone', 'matches_only', 'nobody']) &&
         data.lastSeen is timestamp &&
         data.updatedAt is timestamp;
+    }
+
+    function canReadPresenceData(data, userId) {
+      return isAdmin() ||
+        isOwner(userId) ||
+        (isSignedIn() && (
+          !('privacyMode' in data) ||
+          data.privacyMode == 'everyone' ||
+          (data.privacyMode == 'matches_only' && isMatchedWith(userId))
+        ));
     }
 
     function isValidTypingStatus(data) {
@@ -251,18 +272,30 @@ service cloud.firestore {
         data.updatedAt is timestamp;
     }
 
+    function isValidTypingStatusRecord(data) {
+      return data.keys().hasAll(['matchId', 'uid', 'recipientUid', 'isTyping', 'updatedAt']) &&
+        data.keys().hasOnly(['matchId', 'uid', 'recipientUid', 'isTyping', 'updatedAt']) &&
+        isValidId(data.matchId) &&
+        isValidId(data.uid) &&
+        isValidId(data.recipientUid) &&
+        data.uid != data.recipientUid &&
+        data.isTyping is bool &&
+        data.updatedAt is timestamp;
+    }
+
     function isValidCallSession(data) {
       return data.keys().hasAll([
           'callerUid', 'calleeUid', 'status', 'offerSdp', 'answerSdp',
           'callerCandidates', 'calleeCandidates', 'createdAt', 'updatedAt'
         ]) &&
         data.keys().hasOnly([
-          'callerUid', 'calleeUid', 'status', 'offerSdp', 'answerSdp',
+          'callerUid', 'calleeUid', 'callType', 'status', 'offerSdp', 'answerSdp',
           'callerCandidates', 'calleeCandidates', 'createdAt', 'updatedAt'
         ]) &&
         isValidId(data.callerUid) &&
         isValidId(data.calleeUid) &&
         data.callerUid != data.calleeUid &&
+        (!('callType' in data) || data.callType in ['video', 'audio']) &&
         data.status in ['ringing', 'active', 'ended', 'declined', 'missed'] &&
         data.offerSdp is string && data.offerSdp.size() <= 16000 &&
         data.answerSdp is string && data.answerSdp.size() <= 16000 &&
@@ -341,6 +374,7 @@ service cloud.firestore {
         incoming().membershipTier == 'free' &&
         incoming().accountStatus == 'active' &&
         (!('blueVerified' in incoming()) || incoming().blueVerified == false) &&
+        (!('coverUrl' in incoming()) || incoming().coverUrl == '') &&
         (!('videoIntroUrl' in incoming()) || incoming().videoIntroUrl == '') &&
         (!('privateAlbumCount' in incoming()) || incoming().privateAlbumCount == 0) &&
         incoming().emailVerified == request.auth.token.email_verified &&
@@ -359,7 +393,7 @@ service cloud.firestore {
             isAdmin() &&
             incoming().diff(existing()).affectedKeys().hasOnly([
               'membershipTier', 'accountStatus', 'blueVerified',
-              'photoUrl', 'bio', 'visibility', 'videoIntroUrl', 'updatedAt'
+              'photoUrl', 'coverUrl', 'bio', 'visibility', 'videoIntroUrl', 'updatedAt'
             ])
           ) ||
           (
@@ -371,34 +405,53 @@ service cloud.firestore {
               (!('blueVerified' in incoming()) && !('blueVerified' in existing())) ||
               (('blueVerified' in incoming()) && ('blueVerified' in existing()) && incoming().blueVerified == existing().blueVerified)
             ) &&
-            incoming().emailVerified == request.auth.token.email_verified &&
             (
-              incoming().diff(existing()).affectedKeys().hasOnly([
-                'firstName', 'age', 'gender', 'country', 'city',
-                'photoUrl', 'intention', 'interests', 'bio',
-                'visibility', 'emailVerified', 'compatibilityAnswers', 'updatedAt'
-              ]) ||
               (
+                incoming().emailVerified == existing().emailVerified &&
+                incoming().diff(existing()).affectedKeys().hasOnly([
+                  'photoUrl', 'coverUrl', 'updatedAt'
+                ])
+              ) ||
+              (
+                incoming().emailVerified == request.auth.token.email_verified &&
+                incoming().diff(existing()).affectedKeys().hasOnly([
+                  'firstName', 'age', 'gender', 'country', 'city',
+                  'photoUrl', 'coverUrl', 'intention', 'interests', 'bio',
+                  'visibility', 'emailVerified', 'compatibilityAnswers', 'updatedAt'
+                ])
+              ) ||
+              (
+                incoming().emailVerified == request.auth.token.email_verified &&
                 existing().membershipTier == 'premium' &&
                 incoming().diff(existing()).affectedKeys().hasOnly([
                   'videoIntroUrl', 'updatedAt'
                 ])
               ) ||
               (
+                incoming().emailVerified == request.auth.token.email_verified &&
                 existing().membershipTier == 'premium' &&
                 incoming().diff(existing()).affectedKeys().hasOnly([
                   'privateAlbumCount', 'updatedAt'
                 ])
               ) ||
-              incoming().diff(existing()).affectedKeys().hasOnly([
-                'dailyLikesCount', 'dailyLikesDate', 'updatedAt'
-              ]) ||
-              incoming().diff(existing()).affectedKeys().hasOnly([
-                'dailyMessagesCount', 'dailyMessagesDate', 'updatedAt'
-              ]) ||
-              incoming().diff(existing()).affectedKeys().hasOnly([
-                'emailVerified', 'updatedAt'
-              ])
+              (
+                incoming().emailVerified == request.auth.token.email_verified &&
+                incoming().diff(existing()).affectedKeys().hasOnly([
+                  'dailyLikesCount', 'dailyLikesDate', 'updatedAt'
+                ])
+              ) ||
+              (
+                incoming().emailVerified == request.auth.token.email_verified &&
+                incoming().diff(existing()).affectedKeys().hasOnly([
+                  'dailyMessagesCount', 'dailyMessagesDate', 'updatedAt'
+                ])
+              ) ||
+              (
+                incoming().emailVerified == request.auth.token.email_verified &&
+                incoming().diff(existing()).affectedKeys().hasOnly([
+                  'emailVerified', 'updatedAt'
+                ])
+              )
             )
           )
         );
@@ -508,7 +561,7 @@ service cloud.firestore {
           (
             isOwner(userId) &&
             incoming().diff(existing()).affectedKeys().hasOnly([
-              'fullName', 'showAge', 'allowFriendshipRequests', 'updatedAt'
+              'fullName', 'showAge', 'allowFriendshipRequests', 'onlineStatusPrivacy', 'updatedAt'
             ])
           )
         );
@@ -577,18 +630,10 @@ service cloud.firestore {
         incoming().lastMessageAt == request.time &&
         incoming().createdAt == request.time &&
         incoming().updatedAt == request.time &&
-        (
-          (
-            incoming().uidA == request.auth.uid &&
-            getAfter(/databases/$(database)/documents/likes/$(incoming().uidA + '_' + incoming().uidB)).data.action == 'like' &&
-            get(/databases/$(database)/documents/likes/$(incoming().uidB + '_' + incoming().uidA)).data.action == 'like'
-          ) ||
-          (
-            incoming().uidB == request.auth.uid &&
-            getAfter(/databases/$(database)/documents/likes/$(incoming().uidB + '_' + incoming().uidA)).data.action == 'like' &&
-            get(/databases/$(database)/documents/likes/$(incoming().uidA + '_' + incoming().uidB)).data.action == 'like'
-          )
-        );
+        exists(/databases/$(database)/documents/profiles/$(incoming().uidA)) &&
+        exists(/databases/$(database)/documents/profiles/$(incoming().uidB)) &&
+        !exists(/databases/$(database)/documents/blocks/$(incoming().uidA + '_' + incoming().uidB)) &&
+        !exists(/databases/$(database)/documents/blocks/$(incoming().uidB + '_' + incoming().uidA));
 
       allow update: if isValidId(matchId) &&
         isSignedIn() &&
@@ -603,18 +648,29 @@ service cloud.firestore {
           (
             isVerifiedUser() &&
             isNotSuspended() &&
-            existing().status == 'active' &&
             (request.auth.uid in existing().participants) &&
             (
-              incoming().diff(existing()).affectedKeys().hasOnly([
-                'lastMessageText', 'lastMessageAt', 'lastSenderUid',
-                'unreadByUidA', 'unreadByUidB', 'updatedAt'
-              ]) ||
-              incoming().diff(existing()).affectedKeys().hasOnly([
-                'unreadByUidA', 'unreadByUidB', 'updatedAt'
-              ]) ||
               (
-                incoming().status == 'unmatched' &&
+                existing().status == 'active' &&
+                (
+                  incoming().diff(existing()).affectedKeys().hasOnly([
+                    'lastMessageText', 'lastMessageAt', 'lastSenderUid',
+                    'unreadByUidA', 'unreadByUidB', 'updatedAt'
+                  ]) ||
+                  incoming().diff(existing()).affectedKeys().hasOnly([
+                    'unreadByUidA', 'unreadByUidB', 'updatedAt'
+                  ]) ||
+                  (
+                    incoming().status == 'unmatched' &&
+                    incoming().diff(existing()).affectedKeys().hasOnly(['status', 'updatedAt'])
+                  )
+                )
+              ) ||
+              (
+                existing().status == 'unmatched' &&
+                incoming().status == 'active' &&
+                !exists(/databases/$(database)/documents/blocks/$(existing().uidA + '_' + existing().uidB)) &&
+                !exists(/databases/$(database)/documents/blocks/$(existing().uidB + '_' + existing().uidA)) &&
                 incoming().diff(existing()).affectedKeys().hasOnly(['status', 'updatedAt'])
               )
             )
@@ -753,12 +809,25 @@ service cloud.firestore {
       }
     }
 
-    // 4d. Online Presence & Last Seen (Matched partners, owner, or admin only)
+    // 4d. Online Presence & Last Seen (Enforces user privacyMode; zero PII)
     match /presence/{userId} {
       allow get: if isValidId(userId) && (
         isAdmin() ||
         isOwner(userId) ||
-        isMatchedWith(userId)
+        (isSignedIn() && (
+          !exists(/databases/$(database)/documents/presence/$(userId)) ||
+          canReadPresenceData(resource.data, userId)
+        ))
+      );
+
+      allow list: if isAdmin() || (
+        isSignedIn() && (
+          resource.data.uid == request.auth.uid ||
+          (
+            isValidId(resource.data.uid) &&
+            canReadPresenceData(resource.data, resource.data.uid)
+          )
+        )
       );
 
       allow create: if isValidId(userId) &&
@@ -774,9 +843,66 @@ service cloud.firestore {
         incoming().uid == existing().uid &&
         incoming().lastSeen == request.time &&
         incoming().updatedAt == request.time &&
-        incoming().diff(existing()).affectedKeys().hasOnly(['isOnline', 'lastSeen', 'updatedAt']);
+        incoming().diff(existing()).affectedKeys().hasOnly(['isOnline', 'privacyMode', 'lastSeen', 'updatedAt']);
 
       allow delete: if isValidId(userId) && (isAdmin() || isOwner(userId));
+    }
+
+    // 4e. Real-Time Conversation Typing Status Collection
+    match /typingStatus/{typingId} {
+      allow get: if typingId is string &&
+        typingId.size() >= 1 &&
+        typingId.size() <= 300 &&
+        typingId.matches('^[a-zA-Z0-9_\\-]+$') &&
+        (
+          isAdmin() ||
+          (isVerifiedUser() && (
+            typingId.matches('^' + request.auth.uid + '_.*') ||
+            typingId.matches('.*_' + request.auth.uid + '_.*') ||
+            typingId.matches('.*_' + request.auth.uid + '$')
+          ))
+        );
+
+      allow list: if isAdmin() || (
+        isVerifiedUser() && (
+          resource.data.uid == request.auth.uid ||
+          resource.data.recipientUid == request.auth.uid
+        )
+      );
+
+      allow create: if typingId is string &&
+        typingId.size() >= 1 &&
+        typingId.size() <= 300 &&
+        typingId.matches('^[a-zA-Z0-9_\\-]+$') &&
+        isVerifiedUser() &&
+        isNotSuspended() &&
+        isValidTypingStatusRecord(incoming()) &&
+        incoming().uid == request.auth.uid &&
+        typingId == (incoming().matchId + '_' + incoming().uid) &&
+        incoming().updatedAt == request.time &&
+        exists(/databases/$(database)/documents/matches/$(incoming().matchId)) &&
+        get(/databases/$(database)/documents/matches/$(incoming().matchId)).data.status == 'active' &&
+        (request.auth.uid in get(/databases/$(database)/documents/matches/$(incoming().matchId)).data.participants) &&
+        (incoming().recipientUid in get(/databases/$(database)/documents/matches/$(incoming().matchId)).data.participants) &&
+        incoming().recipientUid != incoming().uid;
+
+      allow update: if typingId is string &&
+        typingId.size() >= 1 &&
+        typingId.size() <= 300 &&
+        typingId.matches('^[a-zA-Z0-9_\\-]+$') &&
+        isVerifiedUser() &&
+        isNotSuspended() &&
+        isValidTypingStatusRecord(incoming()) &&
+        incoming().uid == existing().uid &&
+        incoming().matchId == existing().matchId &&
+        incoming().recipientUid == existing().recipientUid &&
+        incoming().uid == request.auth.uid &&
+        incoming().updatedAt == request.time &&
+        incoming().diff(existing()).affectedKeys().hasOnly(['isTyping', 'updatedAt']) &&
+        get(/databases/$(database)/documents/matches/$(existing().matchId)).data.status == 'active' &&
+        (request.auth.uid in get(/databases/$(database)/documents/matches/$(existing().matchId)).data.participants);
+
+      allow delete: if isAdmin() || (isSignedIn() && resource.data.uid == request.auth.uid);
     }
 
     // 5. Member Blocks

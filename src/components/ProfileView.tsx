@@ -3,6 +3,7 @@ import {
   CheckCircle2,
   Crown,
   Film,
+  ImagePlus,
   Images,
   Lock,
   LogOut,
@@ -14,7 +15,13 @@ import {
   X,
   Zap,
 } from 'lucide-react';
-import { useEffect, useState, type ChangeEvent, type FormEvent } from 'react';
+import {
+  useEffect,
+  useRef,
+  useState,
+  type ChangeEvent,
+  type FormEvent,
+} from 'react';
 import { useAuth } from '../context/AuthContext';
 import { useDataSaver } from '../context/DataSaverContext';
 import {
@@ -23,13 +30,18 @@ import {
   savePrivateAlbumPhotos,
   unblockMember,
   updateMyCompatibilityQuiz,
+  updateMyPresence,
   updateMyPrivateSettings,
   updateMyPublicProfile,
   updateMyVideoIntro,
 } from '../services/datingService';
 import {
+  removeProfileImage,
+  uploadImage,
+  validateImageFile,
+} from '../services/imageService';
+import {
   uploadPrivateAlbumPhoto,
-  uploadProfilePhoto,
   uploadVideoIntro,
 } from '../services/storageService';
 import {
@@ -38,12 +50,14 @@ import {
   POPULAR_INTERESTS,
   type GenderOption,
   type IntentionOption,
+  type PresencePrivacy,
   type ViewRoute,
   type VisibilityOption,
 } from '../types/app';
 import { Avatar } from './Avatar';
-import { MemberBadges } from './MemberBadges';
+import { ImageCropModal } from './ImageCropModal';
 import { InstallAppButton } from './InstallAppButton';
+import { MemberBadges } from './MemberBadges';
 
 interface ProfileViewProps {
   onNavigate: (route: ViewRoute) => void;
@@ -64,6 +78,9 @@ export function ProfileView({ onNavigate }: ProfileViewProps) {
   } = useAuth();
   const { dataSaver, toggleDataSaver } = useDataSaver();
 
+  const avatarInputRef = useRef<HTMLInputElement | null>(null);
+  const coverInputRef = useRef<HTMLInputElement | null>(null);
+
   const [firstName, setFirstName] = useState(profile?.firstName || '');
   const [fullName, setFullName] = useState(privateProfile?.fullName || '');
   const [gender, setGender] = useState<GenderOption>(
@@ -83,7 +100,25 @@ export function ProfileView({ onNavigate }: ProfileViewProps) {
   const [allowFriendshipRequests, setAllowFriendshipRequests] = useState(
     privateProfile?.allowFriendshipRequests ?? true
   );
+  const [onlineStatusPrivacy, setOnlineStatusPrivacy] =
+    useState<PresencePrivacy>(
+      privateProfile?.onlineStatusPrivacy ?? 'everyone'
+    );
   const [photoUrl, setPhotoUrl] = useState(profile?.photoUrl || '');
+  const [coverUrl, setCoverUrl] = useState(profile?.coverUrl || '');
+  const [coverFailed, setCoverFailed] = useState(false);
+
+  // Interactive cropper modal state
+  const [cropTask, setCropTask] = useState<{
+    file: File;
+    preset: 'avatar' | 'cover';
+  } | null>(null);
+  const [removingMedia, setRemovingMedia] = useState<'avatar' | 'cover' | null>(
+    null
+  );
+  const [confirmRemoveKind, setConfirmRemoveKind] = useState<
+    'avatar' | 'cover' | null
+  >(null);
 
   // Compatibility quiz answers (6 slots matching COMPATIBILITY_QUESTIONS)
   const [quizAnswers, setQuizAnswers] = useState<string[]>(() => {
@@ -98,7 +133,6 @@ export function ProfileView({ onNavigate }: ProfileViewProps) {
   const [albumLoaded, setAlbumLoaded] = useState(false);
   const [albumUploadProgress, setAlbumUploadProgress] = useState<number | null>(null);
 
-  const [uploadProgress, setUploadProgress] = useState<number | null>(null);
   const [saving, setSaving] = useState(false);
   const [saveMessage, setSaveMessage] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -119,6 +153,8 @@ export function ProfileView({ onNavigate }: ProfileViewProps) {
       setBio(profile.bio);
       setVisibility(profile.visibility);
       setPhotoUrl(profile.photoUrl);
+      setCoverUrl(profile.coverUrl || '');
+      setCoverFailed(false);
       const base = profile.compatibilityAnswers || [];
       setQuizAnswers(COMPATIBILITY_QUESTIONS.map((_, i) => base[i] || ''));
     }
@@ -129,6 +165,9 @@ export function ProfileView({ onNavigate }: ProfileViewProps) {
       setFullName(privateProfile.fullName);
       setShowAge(privateProfile.showAge);
       setAllowFriendshipRequests(privateProfile.allowFriendshipRequests);
+      setOnlineStatusPrivacy(
+        privateProfile.onlineStatusPrivacy ?? 'everyone'
+      );
     }
   }, [privateProfile]);
 
@@ -215,38 +254,76 @@ export function ProfileView({ onNavigate }: ProfileViewProps) {
   const isPremium = profile.membershipTier === 'premium';
   const isBlueVerified = Boolean(profile.blueVerified);
 
-  const handlePhotoSelect = async (e: ChangeEvent<HTMLInputElement>) => {
+  const handleSelectGalleryImage = (
+    e: ChangeEvent<HTMLInputElement>,
+    preset: 'avatar' | 'cover'
+  ) => {
     const file = e.target.files?.[0];
+    e.target.value = '';
     if (!file) return;
     setError(null);
     setSaveMessage(null);
-    setUploadProgress(0);
+    setConfirmRemoveKind(null);
     try {
-      const url = await uploadProfilePhoto(
-        user.uid,
-        file,
-        setUploadProgress,
-        dataSaver
-      );
-      setPhotoUrl(url);
-      await updateMyPublicProfile(user.uid, {
-        firstName: firstName || profile.firstName,
-        age: profile.age,
-        gender,
-        country,
-        city,
-        photoUrl: url,
-        intention,
-        interests,
-        bio,
-        visibility,
-        emailVerified: user.emailVerified,
-      });
-      setSaveMessage('Profile photo updated.');
+      validateImageFile(file);
+      setCropTask({ file, preset });
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Photo upload failed.');
+      setError(err instanceof Error ? err.message : 'Invalid image file.');
+    }
+  };
+
+  const handleConfirmCroppedImage = async (
+    croppedBlob: Blob,
+    onProgress: (percent: number) => void
+  ) => {
+    if (!cropTask) return;
+    const { preset } = cropTask;
+    const previousUrl = preset === 'avatar' ? photoUrl : coverUrl;
+
+    const { url } = await uploadImage(croppedBlob, {
+      uid: user.uid,
+      type: preset,
+      onProgress,
+      dataSaver,
+      updateFirestore: true,
+      previousUrl,
+    });
+
+    if (preset === 'avatar') {
+      setPhotoUrl(url);
+      setSaveMessage('Profile picture updated and saved.');
+    } else {
+      setCoverUrl(url);
+      setCoverFailed(false);
+      setSaveMessage('Profile cover updated and saved.');
+    }
+
+    setCropTask(null);
+  };
+
+  const handleRemoveProfileMedia = async (kind: 'avatar' | 'cover') => {
+    const previousUrl = kind === 'avatar' ? photoUrl : coverUrl;
+    if (!previousUrl) return;
+    setRemovingMedia(kind);
+    setError(null);
+    setSaveMessage(null);
+    try {
+      await removeProfileImage(user.uid, kind, previousUrl);
+      if (kind === 'avatar') {
+        setPhotoUrl('');
+        setSaveMessage('Profile picture removed.');
+      } else {
+        setCoverUrl('');
+        setCoverFailed(false);
+        setSaveMessage('Profile cover removed.');
+      }
+      setConfirmRemoveKind(null);
+    } catch (err) {
+      setError(
+        err instanceof Error ? err.message : 'Could not remove image. Please retry.'
+      );
     } finally {
-      setUploadProgress(null);
+      setRemovingMedia(null);
     }
   };
 
@@ -372,6 +449,7 @@ export function ProfileView({ onNavigate }: ProfileViewProps) {
         country,
         city,
         photoUrl,
+        coverUrl,
         intention,
         interests,
         bio,
@@ -383,8 +461,16 @@ export function ProfileView({ onNavigate }: ProfileViewProps) {
           fullName: fullName || privateProfile.fullName,
           showAge,
           allowFriendshipRequests,
+          onlineStatusPrivacy,
         });
       }
+      await updateMyPresence(
+        user.uid,
+        typeof document === 'undefined'
+          ? true
+          : document.visibilityState === 'visible' && navigator.onLine,
+        onlineStatusPrivacy
+      );
       setSaveMessage('Your profile and privacy settings were saved.');
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Could not save changes.');
@@ -410,75 +496,201 @@ export function ProfileView({ onNavigate }: ProfileViewProps) {
 
   return (
     <div className="max-w-4xl mx-auto px-4 sm:px-6 py-6 sm:py-8 pb-24 md:pb-16 space-y-6">
-      {/* Summary Header */}
-      <section className="bg-white rounded-2xl border border-purple-950/10 p-6 flex flex-col sm:flex-row sm:items-center justify-between gap-5">
-        <div className="flex items-center gap-4">
-          <Avatar
-            src={photoUrl}
-            name={firstName || profile.firstName}
-            size="lg"
-            blueVerified={isBlueVerified}
+      {/* Hidden native gallery pickers for fast mobile & desktop access */}
+      <input
+        ref={avatarInputRef}
+        id="profile-photo-upload"
+        type="file"
+        accept="image/jpeg,image/jpg,image/png,image/webp,image/*"
+        onChange={(e) => handleSelectGalleryImage(e, 'avatar')}
+        className="sr-only"
+      />
+      <input
+        ref={coverInputRef}
+        id="profile-cover-upload"
+        type="file"
+        accept="image/jpeg,image/jpg,image/png,image/webp,image/*"
+        onChange={(e) => handleSelectGalleryImage(e, 'cover')}
+        className="sr-only"
+      />
+
+      {/* Modern Hero Profile Card with Profile Cover & Overlapping Profile Picture */}
+      <section className="bg-white rounded-3xl border border-purple-950/10 overflow-hidden shadow-xs">
+        {/* Profile Cover Banner */}
+        <div className="relative h-44 sm:h-56 w-full bg-gradient-to-br from-[#2E1065] via-[#6B21A8] to-[#DB2777] overflow-hidden">
+          {coverUrl && !coverFailed ? (
+            <img
+              src={coverUrl}
+              alt={`${profile.firstName} profile cover`}
+              loading="eager"
+              decoding="async"
+              referrerPolicy="no-referrer"
+              onError={() => setCoverFailed(true)}
+              className="w-full h-full object-cover"
+            />
+          ) : (
+            <div
+              aria-hidden="true"
+              className="w-full h-full opacity-40 bg-[radial-gradient(circle_at_18%_25%,#ffffff45,transparent_45%),radial-gradient(circle_at_82%_75%,#f472b665,transparent_50%)]"
+            />
+          )}
+
+          <div
+            aria-hidden="true"
+            className="pointer-events-none absolute inset-x-0 bottom-0 h-20 bg-gradient-to-t from-black/50 to-transparent"
           />
-          <div>
-            <div className="flex items-center gap-2 flex-wrap">
-              <h1 className="text-2xl font-bold text-[#2E1065]">
-                {profile.firstName}, <span className="tabular-nums">{profile.age}</span>
-              </h1>
-              <MemberBadges
-                blueVerified={isBlueVerified}
-                membershipTier={profile.membershipTier}
-              />
-            </div>
-            <p className="text-sm text-purple-950/70">
-              {profile.city} · {profile.country}
-            </p>
-            <div className="mt-1.5 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs font-medium">
-              <span
-                className={
-                  user.emailVerified ? 'text-emerald-700' : 'text-amber-700'
+
+          {/* Cover Actions Overlay */}
+          <div className="absolute top-3 right-3 sm:top-4 sm:right-4 flex flex-wrap items-center justify-end gap-2">
+            <button
+              type="button"
+              onClick={() => coverInputRef.current?.click()}
+              className="min-h-[42px] px-3.5 py-2 rounded-xl bg-black/60 hover:bg-black/75 text-white text-xs sm:text-sm font-semibold inline-flex items-center gap-1.5 backdrop-blur-xs border border-white/20 transition-colors"
+            >
+              <ImagePlus className="w-4 h-4" />
+              <span>{coverUrl ? 'Edit Cover' : 'Add Cover'}</span>
+            </button>
+
+            {coverUrl && (
+              <button
+                type="button"
+                disabled={removingMedia === 'cover'}
+                onClick={() =>
+                  setConfirmRemoveKind((k) => (k === 'cover' ? null : 'cover'))
                 }
+                aria-label="Remove profile cover"
+                className="min-h-[42px] px-3 py-2 rounded-xl bg-black/60 hover:bg-red-700/85 text-white text-xs font-semibold inline-flex items-center gap-1.5 backdrop-blur-xs border border-white/20 transition-colors disabled:opacity-50"
               >
-                {user.emailVerified ? 'Email Verified' : 'Email Pending Verification'}
-              </span>
-              <span aria-hidden="true">·</span>
-              <span
-                className={
-                  isPremium ? 'text-amber-700 font-semibold' : 'text-purple-950/65'
-                }
-              >
-                {isPremium ? 'Confirmed Premium' : 'Free Membership'}
-              </span>
-            </div>
+                <Trash2 className="w-4 h-4" />
+                <span className="hidden sm:inline">Remove</span>
+              </button>
+            )}
           </div>
         </div>
 
-        <div className="flex flex-wrap gap-2">
-          <InstallAppButton
-            variant="subtle"
-            hideWhenStandalone
-            onOpenGuide={() => onNavigate('install')}
-          />
-          {!isPremium && (
-            <button
-              type="button"
-              onClick={() => onNavigate('premium')}
-              className="min-h-[44px] px-4 py-2 rounded-xl bg-gradient-to-r from-[#6B21A8] to-[#DB2777] text-white text-sm font-semibold inline-flex items-center gap-1.5"
-            >
-              <Crown className="w-4 h-4" />
-              <span>View Membership</span>
-            </button>
+        {/* Profile Info & Action Controls */}
+        <div className="px-5 sm:px-7 pb-6">
+          <div className="flex flex-col sm:flex-row sm:items-end justify-between gap-4 -mt-12 sm:-mt-14 relative z-10">
+            <div className="flex flex-col sm:flex-row sm:items-end gap-4">
+              {/* Profile Picture with Camera / Edit Icon */}
+              <div className="relative self-start">
+                <div className="p-1.5 rounded-2xl bg-white shadow-md">
+                  <Avatar
+                    src={photoUrl}
+                    name={firstName || profile.firstName}
+                    size="xl"
+                    blueVerified={isBlueVerified}
+                  />
+                </div>
+                <button
+                  type="button"
+                  onClick={() => avatarInputRef.current?.click()}
+                  aria-label="Change profile picture"
+                  title="Change profile picture"
+                  className="absolute -bottom-1.5 -right-1.5 min-h-[40px] min-w-[40px] rounded-full bg-[#2E1065] hover:bg-[#4C1D95] text-white border-2 border-white shadow-md flex items-center justify-center transition-colors"
+                >
+                  <Camera className="w-4 h-4" />
+                </button>
+              </div>
+
+              <div className="pt-1 sm:pb-1">
+                <div className="flex items-center gap-2 flex-wrap">
+                  <h1 className="text-2xl font-bold text-[#2E1065]">
+                    {profile.firstName},{' '}
+                    <span className="tabular-nums">{profile.age}</span>
+                  </h1>
+                  <MemberBadges
+                    blueVerified={isBlueVerified}
+                    membershipTier={profile.membershipTier}
+                  />
+                </div>
+                <p className="text-sm text-purple-950/70">
+                  {profile.city} · {profile.country}
+                </p>
+                <div className="mt-1.5 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs font-medium">
+                  <span
+                    className={
+                      user.emailVerified ? 'text-emerald-700' : 'text-amber-700'
+                    }
+                  >
+                    {user.emailVerified
+                      ? 'Email Verified'
+                      : 'Email Pending Verification'}
+                  </span>
+                  <span aria-hidden="true">·</span>
+                  <span
+                    className={
+                      isPremium
+                        ? 'text-amber-700 font-semibold'
+                        : 'text-purple-950/65'
+                    }
+                  >
+                    {isPremium ? 'Confirmed Premium' : 'Free Membership'}
+                  </span>
+                </div>
+              </div>
+            </div>
+
+            <div className="flex flex-wrap gap-2">
+              <InstallAppButton
+                variant="subtle"
+                hideWhenStandalone
+                onOpenGuide={() => onNavigate('install')}
+              />
+              {!isPremium && (
+                <button
+                  type="button"
+                  onClick={() => onNavigate('premium')}
+                  className="min-h-[44px] px-4 py-2 rounded-xl bg-gradient-to-r from-[#6B21A8] to-[#DB2777] text-white text-sm font-semibold inline-flex items-center gap-1.5"
+                >
+                  <Crown className="w-4 h-4" />
+                  <span>View Membership</span>
+                </button>
+              )}
+              <button
+                type="button"
+                onClick={async () => {
+                  await logout();
+                  onNavigate('home');
+                }}
+                className="min-h-[44px] px-4 py-2 rounded-xl border border-purple-950/20 hover:bg-purple-50 text-sm font-semibold text-[#2E1065] inline-flex items-center gap-1.5"
+              >
+                <LogOut className="w-4 h-4" />
+                <span>Logout</span>
+              </button>
+            </div>
+          </div>
+
+          {/* Inline Confirmation Strip for Removing Cover or Profile Picture */}
+          {confirmRemoveKind && (
+            <div className="mt-4 p-3.5 rounded-xl bg-red-50 border border-red-200 flex flex-wrap items-center justify-between gap-3">
+              <span className="text-xs font-semibold text-red-950">
+                {confirmRemoveKind === 'cover'
+                  ? 'Remove your Profile Cover background?'
+                  : 'Remove your current Profile Picture?'}
+              </span>
+              <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  disabled={removingMedia !== null}
+                  onClick={() => void handleRemoveProfileMedia(confirmRemoveKind)}
+                  className="min-h-[38px] px-3.5 py-1.5 rounded-lg bg-red-700 hover:bg-red-800 text-white text-xs font-semibold disabled:opacity-50"
+                >
+                  {removingMedia === confirmRemoveKind
+                    ? 'Removing...'
+                    : 'Yes, Remove'}
+                </button>
+                <button
+                  type="button"
+                  disabled={removingMedia !== null}
+                  onClick={() => setConfirmRemoveKind(null)}
+                  className="min-h-[38px] px-3 py-1.5 rounded-lg border border-red-300 bg-white text-xs font-semibold text-red-900"
+                >
+                  Cancel
+                </button>
+              </div>
+            </div>
           )}
-          <button
-            type="button"
-            onClick={async () => {
-              await logout();
-              onNavigate('home');
-            }}
-            className="min-h-[44px] px-4 py-2 rounded-xl border border-purple-950/20 hover:bg-purple-50 text-sm font-semibold text-[#2E1065] inline-flex items-center gap-1.5"
-          >
-            <LogOut className="w-4 h-4" />
-            <span>Logout</span>
-          </button>
         </div>
       </section>
 
@@ -540,37 +752,93 @@ export function ProfileView({ onNavigate }: ProfileViewProps) {
           Edit Profile & Privacy
         </h2>
 
-        {/* Photo Upload */}
-        <div className="flex flex-col sm:flex-row sm:items-center gap-4 pb-5 border-b border-purple-950/10">
-          <Avatar
-            src={photoUrl}
-            name={firstName || profile.firstName}
-            size="lg"
-            blueVerified={isBlueVerified}
-          />
-          <div className="flex-1">
-            <label
-              htmlFor="profile-photo-upload"
-              className="inline-flex items-center gap-2 min-h-[42px] px-4 py-2 rounded-xl border border-purple-950/20 hover:bg-purple-50 text-sm font-semibold text-[#2E1065] cursor-pointer"
-            >
-              <Camera className="w-4 h-4" />
-              <span>Change Profile Photo</span>
-              <input
-                id="profile-photo-upload"
-                type="file"
-                accept="image/*"
-                onChange={handlePhotoSelect}
-                className="sr-only"
-              />
-            </label>
-            {uploadProgress !== null && (
-              <p className="text-xs font-medium text-purple-700 mt-1.5 tabular-nums">
-                Uploading photo: {uploadProgress}%
-              </p>
-            )}
-            <p className="text-xs text-purple-950/60 mt-1.5">
-              Photos are automatically resized and compressed for fast mobile loading.
-            </p>
+        {/* Profile Picture & Cover Quick Customization Cards */}
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-4 pb-5 border-b border-purple-950/10">
+          {/* Profile Picture Card */}
+          <div className="rounded-xl border border-purple-950/10 bg-purple-50/40 p-4 flex items-center gap-4">
+            <Avatar
+              src={photoUrl}
+              name={firstName || profile.firstName}
+              size="lg"
+              blueVerified={isBlueVerified}
+            />
+            <div className="flex-1 min-w-0 space-y-2">
+              <div>
+                <p className="text-sm font-bold text-[#2E1065]">
+                  Profile Picture
+                </p>
+                <p className="text-xs text-purple-950/65">
+                  Crop, zoom & reposition before saving automatically.
+                </p>
+              </div>
+              <div className="flex flex-wrap gap-2">
+                <button
+                  type="button"
+                  onClick={() => avatarInputRef.current?.click()}
+                  className="min-h-[40px] px-3.5 py-1.5 rounded-xl bg-[#2E1065] hover:bg-[#4C1D95] text-white text-xs font-semibold inline-flex items-center gap-1.5"
+                >
+                  <Camera className="w-3.5 h-3.5" />
+                  <span>{photoUrl ? 'Change Photo' : 'Upload Photo'}</span>
+                </button>
+                {photoUrl && (
+                  <button
+                    type="button"
+                    disabled={removingMedia === 'avatar'}
+                    onClick={() => setConfirmRemoveKind('avatar')}
+                    className="min-h-[40px] px-3 py-1.5 rounded-xl border border-red-200 bg-white hover:bg-red-50 text-red-700 text-xs font-semibold inline-flex items-center gap-1"
+                  >
+                    <Trash2 className="w-3.5 h-3.5" />
+                    <span>Remove</span>
+                  </button>
+                )}
+              </div>
+            </div>
+          </div>
+
+          {/* Profile Cover / Background Card */}
+          <div className="rounded-xl border border-purple-950/10 bg-purple-50/40 p-4 flex items-center gap-4">
+            <div className="w-24 h-20 rounded-xl overflow-hidden bg-gradient-to-br from-[#2E1065] via-[#6B21A8] to-[#DB2777] shrink-0 border border-purple-950/15">
+              {coverUrl && !coverFailed && (
+                <img
+                  src={coverUrl}
+                  alt="Cover preview"
+                  loading="lazy"
+                  decoding="async"
+                  className="w-full h-full object-cover"
+                />
+              )}
+            </div>
+            <div className="flex-1 min-w-0 space-y-2">
+              <div>
+                <p className="text-sm font-bold text-[#2E1065]">
+                  Profile Cover / Background
+                </p>
+                <p className="text-xs text-purple-950/65">
+                  Visible behind your profile banner to other members.
+                </p>
+              </div>
+              <div className="flex flex-wrap gap-2">
+                <button
+                  type="button"
+                  onClick={() => coverInputRef.current?.click()}
+                  className="min-h-[40px] px-3.5 py-1.5 rounded-xl bg-white border border-purple-950/20 hover:bg-purple-50 text-[#2E1065] text-xs font-semibold inline-flex items-center gap-1.5"
+                >
+                  <ImagePlus className="w-3.5 h-3.5" />
+                  <span>{coverUrl ? 'Edit Cover' : 'Add Cover'}</span>
+                </button>
+                {coverUrl && (
+                  <button
+                    type="button"
+                    disabled={removingMedia === 'cover'}
+                    onClick={() => setConfirmRemoveKind('cover')}
+                    className="min-h-[40px] px-3 py-1.5 rounded-xl border border-red-200 bg-white hover:bg-red-50 text-red-700 text-xs font-semibold inline-flex items-center gap-1"
+                  >
+                    <Trash2 className="w-3.5 h-3.5" />
+                    <span>Remove</span>
+                  </button>
+                )}
+              </div>
+            </div>
           </div>
         </div>
 
@@ -738,6 +1006,36 @@ export function ProfileView({ onNavigate }: ProfileViewProps) {
               </option>
               <option value="hidden">Hidden (Pause my profile from discovery)</option>
             </select>
+          </div>
+
+          <div>
+            <label
+              htmlFor="prof-online-privacy"
+              className="block text-sm font-semibold text-[#2E1065] mb-1.5"
+            >
+              Online Status &amp; Last Seen Privacy
+            </label>
+            <select
+              id="prof-online-privacy"
+              value={onlineStatusPrivacy}
+              onChange={(e) =>
+                setOnlineStatusPrivacy(e.target.value as PresencePrivacy)
+              }
+              className="w-full min-h-[44px] rounded-xl border border-purple-950/20 px-3.5 text-sm bg-white"
+            >
+              <option value="everyone">
+                Everyone (Show when I&apos;m online &amp; my last seen)
+              </option>
+              <option value="matches_only">
+                Matches &amp; Active Chats Only
+              </option>
+              <option value="nobody">
+                Nobody (Hide my online status &amp; last seen)
+              </option>
+            </select>
+            <p className="text-xs text-purple-950/65 mt-1">
+              Controls who can see your live Online indicator and Last seen time in chat.
+            </p>
           </div>
 
           <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 p-4 rounded-xl bg-purple-50/70 border border-purple-950/10">
@@ -1095,6 +1393,16 @@ export function ProfileView({ onNavigate }: ProfileViewProps) {
           </div>
         </div>
       </section>
+
+      {cropTask && (
+        <ImageCropModal
+          file={cropTask.file}
+          preset={cropTask.preset}
+          dataSaver={dataSaver}
+          onConfirm={handleConfirmCroppedImage}
+          onClose={() => setCropTask(null)}
+        />
+      )}
     </div>
   );
 }

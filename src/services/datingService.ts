@@ -39,6 +39,7 @@ import {
   type MatchRecord,
   type MembershipTier,
   type PremiumMembershipRecord,
+  type PresencePrivacy,
   type PresenceStatus,
   type PrivateAlbum,
   type PrivateProfile,
@@ -120,7 +121,8 @@ export async function createInitialUserProfiles(
     gender: payload.gender,
     country: payload.country.trim().slice(0, 80),
     city: payload.city.trim().slice(0, 80),
-    photoUrl: payload.photoUrl.slice(0, 1500),
+    photoUrl: payload.photoUrl.slice(0, 140000),
+    coverUrl: '',
     intention: payload.intention,
     interests: payload.interests.slice(0, 10),
     bio: payload.bio.trim().slice(0, 600),
@@ -146,6 +148,7 @@ export async function createInitialUserProfiles(
     dateOfBirth: payload.dateOfBirth,
     showAge: true,
     allowFriendshipRequests: true,
+    onlineStatusPrivacy: 'everyone' as PresencePrivacy,
     createdAt: serverTimestamp(),
     updatedAt: serverTimestamp(),
   };
@@ -349,6 +352,97 @@ export function subscribeMyMatches(
   );
 }
 
+export function subscribeAllChatMembers(
+  myUid: string,
+  onData: (members: PublicProfile[]) => void,
+  onError: (err: Error) => void
+): Unsubscribe {
+  const path = 'profiles';
+  const q = query(
+    collection(db, 'profiles'),
+    where('accountStatus', '==', 'active'),
+    where('visibility', '==', 'public'),
+    limit(200)
+  );
+  return onSnapshot(
+    q,
+    (snapshot) => {
+      const members = snapshot.docs
+        .map((d) => d.data() as PublicProfile)
+        .filter((p) => p.uid !== myUid);
+      onData(members);
+    },
+    (error) => {
+      try {
+        handleFirestoreError(error, OperationType.LIST, path);
+      } catch (wrapped) {
+        onError(wrapped as Error);
+      }
+    }
+  );
+}
+
+export async function getOrCreateDirectConversation(
+  myProfile: PublicProfile,
+  targetProfile: PublicProfile
+): Promise<MatchRecord> {
+  const myUid = myProfile.uid;
+  const targetUid = targetProfile.uid;
+  if (myUid === targetUid) {
+    throw new Error('You cannot start a conversation with yourself.');
+  }
+
+  const [uidA, uidB] =
+    myUid < targetUid ? [myUid, targetUid] : [targetUid, myUid];
+  const matchId = `${uidA}_${uidB}`;
+  const isMyA = myUid === uidA;
+  const matchRef = doc(db, 'matches', matchId);
+
+  try {
+    const existingSnap = await getDoc(matchRef);
+    if (existingSnap.exists()) {
+      const existingData = existingSnap.data() as Omit<MatchRecord, 'id'>;
+      if (existingData.status === 'unmatched') {
+        await updateDoc(matchRef, {
+          status: 'active',
+          updatedAt: serverTimestamp(),
+        });
+        return { ...existingData, status: 'active', id: matchId };
+      }
+      return { ...existingData, id: matchId };
+    }
+
+    const payload = {
+      participants: [uidA, uidB] as [string, string],
+      uidA,
+      uidB,
+      userAName: (isMyA ? myProfile.firstName : targetProfile.firstName).slice(0, 60),
+      userAPhoto: (isMyA ? myProfile.photoUrl : targetProfile.photoUrl).slice(0, 140000),
+      userBName: (isMyA ? targetProfile.firstName : myProfile.firstName).slice(0, 60),
+      userBPhoto: (isMyA ? targetProfile.photoUrl : myProfile.photoUrl).slice(0, 140000),
+      lastMessageText: '',
+      lastMessageAt: serverTimestamp(),
+      lastSenderUid: '',
+      unreadByUidA: 0,
+      unreadByUidB: 0,
+      status: 'active' as const,
+      createdAt: serverTimestamp(),
+      updatedAt: serverTimestamp(),
+    };
+
+    await setDoc(matchRef, payload);
+    return {
+      ...payload,
+      id: matchId,
+      lastMessageAt: new Date(),
+      createdAt: new Date(),
+      updatedAt: new Date(),
+    };
+  } catch (error) {
+    handleFirestoreError(error, OperationType.WRITE, `matches/${matchId}`);
+  }
+}
+
 export function subscribeMatchMessages(
   matchId: string,
   onData: (messages: ChatMessage[], hasMore: boolean) => void,
@@ -518,9 +612,9 @@ export async function recordDiscoveryAction(
         uidA,
         uidB,
         userAName: isMyA ? myProfile.firstName : targetProfile.firstName,
-        userAPhoto: isMyA ? myProfile.photoUrl : targetProfile.photoUrl,
+        userAPhoto: (isMyA ? myProfile.photoUrl : targetProfile.photoUrl).slice(0, 140000),
         userBName: isMyA ? targetProfile.firstName : myProfile.firstName,
-        userBPhoto: isMyA ? targetProfile.photoUrl : myProfile.photoUrl,
+        userBPhoto: (isMyA ? targetProfile.photoUrl : myProfile.photoUrl).slice(0, 140000),
         lastMessageText: '',
         lastMessageAt: serverTimestamp(),
         lastSenderUid: '',
@@ -559,9 +653,11 @@ export async function recordDiscoveryAction(
 }
 
 export interface SendMessageOptions {
-  messageType?: 'text' | 'audio' | 'image' | 'file';
+  messageType?: 'text' | 'audio' | 'video' | 'image' | 'file';
   audioUrl?: string;
   audioDurationSec?: number;
+  videoUrl?: string;
+  videoDurationSec?: number;
   attachmentUrl?: string;
   attachmentName?: string;
   attachmentMime?: string;
@@ -576,12 +672,14 @@ export async function sendChatMessage(
   options?: SendMessageOptions
 ): Promise<void> {
   const messageType = options?.messageType || 'text';
-  const audioUrl = (options?.audioUrl || '').slice(0, 1500);
-  const attachmentUrl = (options?.attachmentUrl || '').slice(0, 1500);
+  const audioUrl = (options?.audioUrl || '').slice(0, 500000);
+  const videoUrl = (options?.videoUrl || '').slice(0, 750000);
+  const attachmentUrl = (options?.attachmentUrl || '').slice(0, 220000);
   const cleanText = text.trim().slice(0, 2000);
 
   if (messageType === 'text' && !cleanText) return;
   if (messageType === 'audio' && !audioUrl) return;
+  if (messageType === 'video' && !videoUrl) return;
   if ((messageType === 'image' || messageType === 'file') && !attachmentUrl) return;
 
   const today = getTodayUtcDateString();
@@ -602,22 +700,29 @@ export async function sendChatMessage(
   const summaryPreview =
     messageType === 'audio'
       ? 'Voice message'
-      : messageType === 'image'
-        ? 'Photo'
-        : messageType === 'file'
-          ? `File: ${(options?.attachmentName || 'Attachment').slice(0, 80)}`
-          : cleanText.slice(0, 500);
+      : messageType === 'video'
+        ? 'Video message'
+        : messageType === 'image'
+          ? 'Photo'
+          : messageType === 'file'
+            ? `File: ${(options?.attachmentName || 'Attachment').slice(0, 80)}`
+            : cleanText.slice(0, 500);
 
   const fallbackText =
     cleanText ||
     (messageType === 'audio'
       ? 'Voice message'
-      : messageType === 'image'
-        ? 'Photo'
-        : options?.attachmentName || 'Attachment');
+      : messageType === 'video'
+        ? 'Video message'
+        : messageType === 'image'
+          ? 'Photo'
+          : options?.attachmentName || 'Attachment');
 
   const senderName = myProfile?.firstName?.trim().slice(0, 60);
-  const senderPhoto = myProfile?.photoUrl?.slice(0, 1500);
+  const rawSenderPhoto = myProfile?.photoUrl || '';
+  const senderPhoto = rawSenderPhoto.startsWith('data:')
+    ? undefined
+    : rawSenderPhoto.slice(0, 1500);
 
   try {
     const batch = writeBatch(db);
@@ -634,6 +739,15 @@ export async function sendChatMessage(
             audioDurationSec: Math.max(
               0,
               Math.min(180, Math.round(options.audioDurationSec))
+            ),
+          }
+        : {}),
+      ...(videoUrl ? { videoUrl } : {}),
+      ...(typeof options?.videoDurationSec === 'number'
+        ? {
+            videoDurationSec: Math.max(
+              0,
+              Math.min(180, Math.round(options.videoDurationSec))
             ),
           }
         : {}),
@@ -690,11 +804,13 @@ export async function deleteChatMessage(
       const nextPreview = previousMessage
         ? previousMessage.messageType === 'audio'
           ? 'Voice message'
-          : previousMessage.messageType === 'image'
-            ? 'Photo'
-            : previousMessage.messageType === 'file'
-              ? `File: ${(previousMessage.attachmentName || 'Attachment').slice(0, 80)}`
-              : previousMessage.text.slice(0, 500)
+          : previousMessage.messageType === 'video'
+            ? 'Video message'
+            : previousMessage.messageType === 'image'
+              ? 'Photo'
+              : previousMessage.messageType === 'file'
+                ? `File: ${(previousMessage.attachmentName || 'Attachment').slice(0, 80)}`
+                : previousMessage.text.slice(0, 500)
         : 'Message deleted';
       await updateDoc(doc(db, 'matches', match.id), {
         lastMessageText: nextPreview,
@@ -718,40 +834,54 @@ export async function markMatchConversationRead(
   const myUnread = isReaderA ? match.unreadByUidA : match.unreadByUidB;
 
   const toMark = unreadMessages.filter(
-    (m) => m.senderUid !== readerUid && !m.readByRecipient
+    (m) => m.senderUid !== readerUid && m.readByRecipient !== true && !m.pending
   );
 
-  if (myUnread === 0 && toMark.length === 0) return;
+  const shouldResetMatchUnread = myUnread > 0 && match.status === 'active';
+  if (!shouldResetMatchUnread && toMark.length === 0) return;
 
-  try {
-    const batch = writeBatch(db);
-    if (myUnread > 0) {
-      batch.update(doc(db, 'matches', match.id), {
-        unreadByUidA: isReaderA ? 0 : match.unreadByUidA,
-        unreadByUidB: isReaderA ? match.unreadByUidB : 0,
+  if (toMark.length > 0) {
+    try {
+      const recentUnread = toMark.slice(-400);
+      const msgBatch = writeBatch(db);
+      recentUnread.forEach((m) => {
+        msgBatch.update(doc(db, 'matches', match.id, 'messages', m.id), {
+          readByRecipient: true,
+          readAt: serverTimestamp(),
+        });
+      });
+      await msgBatch.commit();
+    } catch (error) {
+      handleFirestoreError(
+        error,
+        OperationType.UPDATE,
+        `matches/${match.id}/messages`
+      );
+    }
+  }
+
+  if (shouldResetMatchUnread) {
+    try {
+      await updateDoc(doc(db, 'matches', match.id), {
+        [isReaderA ? 'unreadByUidA' : 'unreadByUidB']: 0,
         updatedAt: serverTimestamp(),
       });
+    } catch (error) {
+      handleFirestoreError(error, OperationType.UPDATE, `matches/${match.id}`);
     }
-    toMark.slice(0, 50).forEach((m) => {
-      batch.update(doc(db, 'matches', match.id, 'messages', m.id), {
-        readByRecipient: true,
-        readAt: serverTimestamp(),
-      });
-    });
-    await batch.commit();
-  } catch (error) {
-    handleFirestoreError(error, OperationType.UPDATE, `matches/${match.id}`);
   }
 }
 
 export async function updateMyPresence(
   uid: string,
-  isOnline: boolean
+  isOnline: boolean,
+  privacyMode: PresencePrivacy = 'everyone'
 ): Promise<void> {
   try {
     await setDoc(doc(db, 'presence', uid), {
       uid,
       isOnline,
+      privacyMode,
       lastSeen: serverTimestamp(),
       updatedAt: serverTimestamp(),
     });
@@ -775,14 +905,69 @@ export function subscribeUserPresence(
   );
 }
 
+export function subscribeAllPresence(
+  onData: (presenceMap: Record<string, PresenceStatus>) => void
+): Unsubscribe {
+  const q = query(
+    collection(db, 'presence'),
+    where('privacyMode', '==', 'everyone'),
+    limit(300)
+  );
+  return onSnapshot(
+    q,
+    (snapshot) => {
+      const map: Record<string, PresenceStatus> = {};
+      snapshot.docs.forEach((d) => {
+        const data = d.data() as PresenceStatus;
+        if (data?.uid) {
+          map[data.uid] = data;
+        }
+      });
+      onData(map);
+    },
+    () => {
+      // Keep last known map if connection drops transiently
+    }
+  );
+}
+
+export function subscribePartnerPresences(
+  uids: string[],
+  onUpdate: (uid: string, status: PresenceStatus | null) => void
+): Unsubscribe {
+  const unique = Array.from(new Set(uids.filter(Boolean))).slice(0, 40);
+  if (unique.length === 0) return () => {};
+
+  const unsubs = unique.map((uid) =>
+    onSnapshot(
+      doc(db, 'presence', uid),
+      (snap) => {
+        onUpdate(uid, snap.exists() ? (snap.data() as PresenceStatus) : null);
+      },
+      () => {
+        onUpdate(uid, null);
+      }
+    )
+  );
+
+  return () => {
+    unsubs.forEach((u) => u());
+  };
+}
+
 export async function setTypingStatus(
   matchId: string,
   uid: string,
+  recipientUid: string,
   isTyping: boolean
 ): Promise<void> {
+  if (!matchId || !uid || !recipientUid) return;
+  const typingDocId = `${matchId}_${uid}`;
   try {
-    await setDoc(doc(db, 'matches', matchId, 'typing', uid), {
+    await setDoc(doc(db, 'typingStatus', typingDocId), {
+      matchId,
       uid,
+      recipientUid,
       isTyping,
       updatedAt: serverTimestamp(),
     });
@@ -796,8 +981,9 @@ export function subscribePartnerTyping(
   partnerUid: string,
   onData: (status: TypingStatus | null) => void
 ): Unsubscribe {
+  const typingDocId = `${matchId}_${partnerUid}`;
   return onSnapshot(
-    doc(db, 'matches', matchId, 'typing', partnerUid),
+    doc(db, 'typingStatus', typingDocId),
     (snap) => {
       onData(snap.exists() ? (snap.data() as TypingStatus) : null);
     },
@@ -887,6 +1073,7 @@ export async function updateMyPublicProfile(
     country: string;
     city: string;
     photoUrl: string;
+    coverUrl?: string;
     intention: IntentionOption;
     interests: string[];
     bio: string;
@@ -901,7 +1088,10 @@ export async function updateMyPublicProfile(
       firstName: updates.firstName.trim().slice(0, 50),
       country: updates.country.trim().slice(0, 80),
       city: updates.city.trim().slice(0, 80),
-      photoUrl: updates.photoUrl.slice(0, 1500),
+      photoUrl: updates.photoUrl.slice(0, 140000),
+      ...(updates.coverUrl !== undefined
+        ? { coverUrl: updates.coverUrl.slice(0, 240000) }
+        : {}),
       interests: updates.interests.slice(0, 10),
       bio: updates.bio.trim().slice(0, 600),
       ...(updates.compatibilityAnswers
@@ -909,6 +1099,26 @@ export async function updateMyPublicProfile(
         : {}),
       updatedAt: serverTimestamp(),
     });
+  } catch (error) {
+    handleFirestoreError(error, OperationType.UPDATE, `profiles/${uid}`);
+  }
+}
+
+export async function updateMyProfileMedia(
+  uid: string,
+  media: { photoUrl?: string; coverUrl?: string }
+): Promise<void> {
+  const patch: Record<string, unknown> = {
+    updatedAt: serverTimestamp(),
+  };
+  if (media.photoUrl !== undefined) {
+    patch.photoUrl = media.photoUrl.slice(0, 140000);
+  }
+  if (media.coverUrl !== undefined) {
+    patch.coverUrl = media.coverUrl.slice(0, 240000);
+  }
+  try {
+    await updateDoc(doc(db, 'profiles', uid), patch);
   } catch (error) {
     handleFirestoreError(error, OperationType.UPDATE, `profiles/${uid}`);
   }
@@ -955,7 +1165,7 @@ export async function savePrivateAlbumPhotos(
   uid: string,
   photos: string[]
 ): Promise<void> {
-  const cleanPhotos = photos.slice(0, 4).map((u) => u.slice(0, 1500));
+  const cleanPhotos = photos.slice(0, 4).map((u) => u.slice(0, 180000));
   try {
     const batch = writeBatch(db);
     batch.set(doc(db, 'privateAlbums', uid), {
@@ -977,12 +1187,14 @@ export async function createVideoCallSession(
   matchId: string,
   callerUid: string,
   calleeUid: string,
-  offerSdp: string
+  offerSdp: string,
+  callType: 'video' | 'audio' = 'video'
 ): Promise<string> {
   try {
     const ref = await addDoc(collection(db, 'matches', matchId, 'calls'), {
       callerUid,
       calleeUid,
+      callType,
       status: 'ringing',
       offerSdp: offerSdp.slice(0, 16000),
       answerSdp: '',
@@ -1057,6 +1269,7 @@ export async function updateMyPrivateSettings(
     fullName: string;
     showAge: boolean;
     allowFriendshipRequests: boolean;
+    onlineStatusPrivacy?: PresencePrivacy;
   }
 ): Promise<void> {
   try {
@@ -1064,6 +1277,9 @@ export async function updateMyPrivateSettings(
       fullName: updates.fullName.trim().slice(0, 100),
       showAge: updates.showAge,
       allowFriendshipRequests: updates.allowFriendshipRequests,
+      ...(updates.onlineStatusPrivacy
+        ? { onlineStatusPrivacy: updates.onlineStatusPrivacy }
+        : {}),
       updatedAt: serverTimestamp(),
     });
   } catch (error) {
@@ -1323,7 +1539,7 @@ export function adminSubscribePremiumMemberships(
 
 export async function adminModerateProfileContent(
   targetUid: string,
-  updates: { photoUrl?: string; bio?: string }
+  updates: { photoUrl?: string; coverUrl?: string; bio?: string }
 ): Promise<void> {
   try {
     await updateDoc(doc(db, 'profiles', targetUid), {

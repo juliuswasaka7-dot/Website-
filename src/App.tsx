@@ -1,6 +1,7 @@
-import { Bell, PhoneIncoming, PhoneOff, Video, X } from 'lucide-react';
+import { Bell, Phone, PhoneIncoming, PhoneOff, Video, X } from 'lucide-react';
 import { lazy, Suspense, useEffect, useMemo, useRef, useState } from 'react';
 import { Avatar } from './components/Avatar';
+import { CallPermissionModal } from './components/CallPermissionModal';
 import { EmailVerificationBanner } from './components/EmailVerificationBanner';
 import { HomePage } from './components/HomePage';
 import { Navbar } from './components/Navbar';
@@ -11,6 +12,12 @@ import {
   subscribeMatchCalls,
   updateCallSession,
 } from './services/datingService';
+import {
+  requestCallMediaStream,
+  stopMediaStream,
+  type CallMediaType,
+  type MediaRequestFailure,
+} from './services/mediaPermissionService';
 import type { CallSession, ViewRoute } from './types/app';
 
 const loadAuthView = () =>
@@ -121,12 +128,32 @@ function AppShell() {
   const [globalActiveCall, setGlobalActiveCall] = useState<{
     matchId: string;
     callId: string;
+    callType: CallMediaType;
     partnerName: string;
     partnerPhoto: string;
     initialSession: CallSession;
+    stream: MediaStream;
+  } | null>(null);
+  const globalCallStreamRef = useRef<MediaStream | null>(null);
+  globalCallStreamRef.current = globalActiveCall?.stream ?? null;
+  const [requestingGlobalCallMedia, setRequestingGlobalCallMedia] =
+    useState(false);
+  const [pendingGlobalPermission, setPendingGlobalPermission] = useState<{
+    matchId: string;
+    call: CallSession;
+    callType: CallMediaType;
+    partnerName: string;
+    partnerPhoto: string;
+    failure: MediaRequestFailure;
   } | null>(null);
   const [globalMatchCalls, setGlobalMatchCalls] = useState<CallSession[]>([]);
   const prevCountsRef = useRef<{ matches: number; unread: number } | null>(null);
+
+  useEffect(() => {
+    return () => {
+      stopMediaStream(globalCallStreamRef.current);
+    };
+  }, []);
 
   const navigate = (
     nextRoute: ViewRoute,
@@ -181,10 +208,10 @@ function AppShell() {
     }
 
     if (route !== 'matches') {
-      if (matches.length > prev.matches) {
-        setLiveToast('You have a new mutual match! Tap to say hello.');
-      } else if (totalUnreadMessages > prev.unread) {
+      if (totalUnreadMessages > prev.unread) {
         setLiveToast('New private message received! Tap to reply.');
+      } else if (matches.length > prev.matches) {
+        setLiveToast('New conversation started! Tap to open Chat.');
       }
     }
     prevCountsRef.current = {
@@ -264,10 +291,78 @@ function AppShell() {
   // Clear global call if user logs out
   useEffect(() => {
     if (!user) {
+      stopMediaStream(globalCallStreamRef.current);
       setGlobalActiveCall(null);
+      setPendingGlobalPermission(null);
       setOpenChatMatchId(null);
     }
   }, [user]);
+
+  const handleAcceptGlobalIncomingCall = async (incoming: {
+    matchId: string;
+    call: CallSession;
+    partnerName: string;
+    partnerPhoto: string;
+  }) => {
+    if (requestingGlobalCallMedia) return;
+    const callType: CallMediaType =
+      incoming.call.callType === 'audio' ? 'audio' : 'video';
+    setRequestingGlobalCallMedia(true);
+    const result = await requestCallMediaStream(callType);
+    setRequestingGlobalCallMedia(false);
+
+    if (!result.ok) {
+      setPendingGlobalPermission({
+        matchId: incoming.matchId,
+        call: incoming.call,
+        callType,
+        partnerName: incoming.partnerName,
+        partnerPhoto: incoming.partnerPhoto,
+        failure: result,
+      });
+      return;
+    }
+
+    setPendingGlobalPermission(null);
+    setGlobalActiveCall({
+      matchId: incoming.matchId,
+      callId: incoming.call.id,
+      callType,
+      partnerName: incoming.partnerName,
+      partnerPhoto: incoming.partnerPhoto,
+      initialSession: incoming.call,
+      stream: result.stream,
+    });
+  };
+
+  const handleEnableGlobalPermissions = async () => {
+    if (!pendingGlobalPermission || requestingGlobalCallMedia) return;
+    setRequestingGlobalCallMedia(true);
+    const result = await requestCallMediaStream(
+      pendingGlobalPermission.callType
+    );
+    setRequestingGlobalCallMedia(false);
+
+    if (!result.ok) {
+      setPendingGlobalPermission((prev) =>
+        prev ? { ...prev, failure: result } : null
+      );
+      return;
+    }
+
+    const { matchId, call, callType, partnerName, partnerPhoto } =
+      pendingGlobalPermission;
+    setPendingGlobalPermission(null);
+    setGlobalActiveCall({
+      matchId,
+      callId: call.id,
+      callType,
+      partnerName,
+      partnerPhoto,
+      initialSession: call,
+      stream: result.stream,
+    });
+  };
 
   const topGlobalIncoming = useMemo(() => {
     if (!user || globalActiveCall || incomingCalls.length === 0) return null;
@@ -353,7 +448,7 @@ function AppShell() {
       {topGlobalIncoming && (
         <div
           role="alertdialog"
-          aria-label={`Incoming video call from ${topGlobalIncoming.partnerName}`}
+          aria-label={`Incoming ${topGlobalIncoming.call.callType === 'audio' ? 'voice' : 'video'} call from ${topGlobalIncoming.partnerName}`}
           className="fixed top-16 sm:top-20 right-3 left-3 sm:left-auto sm:w-96 z-50 bg-emerald-950 text-white rounded-2xl p-3.5 shadow-xl border border-emerald-400/35 flex items-center justify-between gap-3"
         >
           <div className="flex items-center gap-3 min-w-0">
@@ -364,13 +459,19 @@ function AppShell() {
                 size="md"
               />
               <span className="absolute -bottom-0.5 -right-0.5 w-4 h-4 rounded-full bg-emerald-500 border-2 border-emerald-950 flex items-center justify-center">
-                <Video className="w-2.5 h-2.5 text-white" />
+                {topGlobalIncoming.call.callType === 'audio' ? (
+                  <Phone className="w-2.5 h-2.5 text-white" />
+                ) : (
+                  <Video className="w-2.5 h-2.5 text-white" />
+                )}
               </span>
             </div>
             <div className="min-w-0">
               <p className="text-[11px] font-bold uppercase tracking-wider text-emerald-300 flex items-center gap-1">
                 <PhoneIncoming className="w-3 h-3 animate-pulse" />
-                Incoming Video Call
+                {topGlobalIncoming.call.callType === 'audio'
+                  ? 'Incoming Voice Call'
+                  : 'Incoming Video Call'}
               </p>
               <p className="text-sm font-bold text-white truncate">
                 {topGlobalIncoming.partnerName}
@@ -388,7 +489,7 @@ function AppShell() {
                   { status: 'declined' }
                 )
               }
-              aria-label="Decline video call"
+              aria-label="Decline call"
               className="min-h-[40px] px-3 rounded-xl bg-rose-600 hover:bg-rose-500 text-white text-xs font-bold inline-flex items-center gap-1 transition-colors"
             >
               <PhoneOff className="w-3.5 h-3.5" />
@@ -396,20 +497,19 @@ function AppShell() {
             </button>
             <button
               type="button"
+              disabled={requestingGlobalCallMedia}
               onClick={() =>
-                setGlobalActiveCall({
-                  matchId: topGlobalIncoming.matchId,
-                  callId: topGlobalIncoming.call.id,
-                  partnerName: topGlobalIncoming.partnerName,
-                  partnerPhoto: topGlobalIncoming.partnerPhoto,
-                  initialSession: topGlobalIncoming.call,
-                })
+                void handleAcceptGlobalIncomingCall(topGlobalIncoming)
               }
-              aria-label="Accept video call"
-              className="min-h-[40px] px-3 rounded-xl bg-emerald-500 hover:bg-emerald-400 text-white text-xs font-bold inline-flex items-center gap-1 transition-colors"
+              aria-label="Accept call"
+              className="min-h-[40px] px-3 rounded-xl bg-emerald-500 hover:bg-emerald-400 disabled:opacity-60 text-white text-xs font-bold inline-flex items-center gap-1 transition-colors"
             >
-              <Video className="w-3.5 h-3.5" />
-              Accept
+              {topGlobalIncoming.call.callType === 'audio' ? (
+                <Phone className="w-3.5 h-3.5" />
+              ) : (
+                <Video className="w-3.5 h-3.5" />
+              )}
+              {requestingGlobalCallMedia ? 'Requesting...' : 'Accept'}
             </button>
           </div>
         </div>
@@ -491,6 +591,16 @@ function AppShell() {
         )}
       </main>
 
+      {pendingGlobalPermission && (
+        <CallPermissionModal
+          failure={pendingGlobalPermission.failure}
+          partnerName={pendingGlobalPermission.partnerName}
+          retrying={requestingGlobalCallMedia}
+          onEnablePermissions={() => void handleEnableGlobalPermissions()}
+          onClose={() => setPendingGlobalPermission(null)}
+        />
+      )}
+
       {globalActiveCall && user && (
         <Suspense fallback={null}>
           <VideoCallModal
@@ -499,9 +609,12 @@ function AppShell() {
             partnerName={globalActiveCall.partnerName}
             partnerPhoto={globalActiveCall.partnerPhoto}
             mode="incoming"
+            callType={globalActiveCall.callType}
             callId={globalActiveCall.callId}
             callSession={liveGlobalCallSession}
+            initialStream={globalActiveCall.stream}
             onClose={() => {
+              stopMediaStream(globalActiveCall.stream);
               setGlobalActiveCall(null);
             }}
           />

@@ -43,6 +43,7 @@ import {
   ADMIN_EMAIL,
   type BlockRecord,
   type MatchRecord,
+  type PresencePrivacy,
   type PrivateProfile,
   type PublicProfile,
 } from '../types/app';
@@ -129,6 +130,11 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   profileStatusRef.current = profileStatus;
   const authInFlightRef = useRef(false);
   const userUid = user?.uid ?? null;
+  const onlinePrivacy: PresencePrivacy =
+    privateProfile?.onlineStatusPrivacy || 'everyone';
+  const onlinePrivacyRef = useRef<PresencePrivacy>(onlinePrivacy);
+  onlinePrivacyRef.current = onlinePrivacy;
+  const isMarkedOnlineRef = useRef(false);
 
   const checkAdminRole = useCallback(async (u: User) => {
     if (!u.emailVerified) {
@@ -313,48 +319,131 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     };
   }, [userUid, reloadNonce]);
 
-  // Lightweight online/last-seen presence lifecycle (optimized for Android 11 battery & RAM)
+  // Real-time activity, connection, & privacy-aware presence lifecycle (Android 11+ & Desktop safe)
   useEffect(() => {
-    if (!userUid) return;
+    if (!userUid) {
+      isMarkedOnlineRef.current = false;
+      return;
+    }
 
-    const markOnline = () => {
-      if (navigator.onLine && document.visibilityState === 'visible') {
-        void updateMyPresence(userUid, true);
+    const HEARTBEAT_INTERVAL_MS = 20_000;
+    const INACTIVITY_TIMEOUT_MS = 90_000;
+    let lastActivityMs = Date.now();
+    let lastWriteMs = 0;
+
+    const sendPresence = (online: boolean, force = false) => {
+      const now = Date.now();
+      if (online) {
+        if (!navigator.onLine || document.visibilityState !== 'visible') {
+          return;
+        }
+        if (
+          !force &&
+          isMarkedOnlineRef.current &&
+          now - lastWriteMs < HEARTBEAT_INTERVAL_MS - 1500
+        ) {
+          return;
+        }
+        isMarkedOnlineRef.current = true;
+        lastWriteMs = now;
+        void updateMyPresence(userUid, true, onlinePrivacyRef.current);
+      } else {
+        if (!force && !isMarkedOnlineRef.current) return;
+        isMarkedOnlineRef.current = false;
+        lastWriteMs = now;
+        if (navigator.onLine) {
+          void updateMyPresence(userUid, false, onlinePrivacyRef.current);
+        }
       }
     };
 
-    const markOffline = () => {
-      if (navigator.onLine) {
-        void updateMyPresence(userUid, false);
+    const handleUserActivity = () => {
+      lastActivityMs = Date.now();
+      if (
+        document.visibilityState === 'visible' &&
+        navigator.onLine &&
+        !isMarkedOnlineRef.current
+      ) {
+        sendPresence(true, true);
       }
     };
 
-    markOnline();
-
-    const handleVis = () => {
-      if (document.visibilityState === 'visible') markOnline();
-      else markOffline();
+    const handleVisibleOrOnline = () => {
+      lastActivityMs = Date.now();
+      if (document.visibilityState === 'visible' && navigator.onLine) {
+        sendPresence(true, true);
+      } else {
+        sendPresence(false, true);
+      }
     };
 
-    window.addEventListener('online', markOnline);
-    window.addEventListener('offline', markOffline);
-    window.addEventListener('pagehide', markOffline);
-    document.addEventListener('visibilitychange', handleVis);
+    const handleOfflineOrClosing = () => {
+      sendPresence(false, true);
+    };
+
+    sendPresence(true, true);
+
+    const activityEvents = [
+      'pointerdown',
+      'keydown',
+      'touchstart',
+      'scroll',
+    ] as const;
+    activityEvents.forEach((evt) => {
+      window.addEventListener(evt, handleUserActivity, { passive: true });
+    });
+    window.addEventListener('focus', handleVisibleOrOnline);
+    window.addEventListener('online', handleVisibleOrOnline);
+    window.addEventListener('offline', handleOfflineOrClosing);
+    window.addEventListener('pagehide', handleOfflineOrClosing);
+    window.addEventListener('beforeunload', handleOfflineOrClosing);
+    document.addEventListener('freeze', handleOfflineOrClosing);
+    document.addEventListener('visibilitychange', handleVisibleOrOnline);
 
     const heartbeat = window.setInterval(() => {
-      if (document.visibilityState === 'visible' && navigator.onLine) {
-        void updateMyPresence(userUid, true);
+      const now = Date.now();
+      if (document.visibilityState !== 'visible' || !navigator.onLine) {
+        sendPresence(false);
+        return;
       }
-    }, 60_000);
+      if (now - lastActivityMs >= INACTIVITY_TIMEOUT_MS) {
+        sendPresence(false);
+        return;
+      }
+      sendPresence(true, true);
+    }, HEARTBEAT_INTERVAL_MS);
 
     return () => {
       window.clearInterval(heartbeat);
-      window.removeEventListener('online', markOnline);
-      window.removeEventListener('offline', markOffline);
-      window.removeEventListener('pagehide', markOffline);
-      document.removeEventListener('visibilitychange', handleVis);
+      activityEvents.forEach((evt) => {
+        window.removeEventListener(evt, handleUserActivity);
+      });
+      window.removeEventListener('focus', handleVisibleOrOnline);
+      window.removeEventListener('online', handleVisibleOrOnline);
+      window.removeEventListener('offline', handleOfflineOrClosing);
+      window.removeEventListener('pagehide', handleOfflineOrClosing);
+      window.removeEventListener('beforeunload', handleOfflineOrClosing);
+      document.removeEventListener('freeze', handleOfflineOrClosing);
+      document.removeEventListener('visibilitychange', handleVisibleOrOnline);
+      if (auth.currentUser?.uid === userUid && navigator.onLine) {
+        isMarkedOnlineRef.current = false;
+        void updateMyPresence(userUid, false, onlinePrivacyRef.current);
+      }
     };
   }, [userUid]);
+
+  // Immediately push updated privacyMode to presence/{uid} when user changes privacy settings
+  useEffect(() => {
+    if (!userUid || !privateProfile?.onlineStatusPrivacy) return;
+    if (!navigator.onLine) return;
+    const isCurrentlyActive =
+      document.visibilityState === 'visible' && isMarkedOnlineRef.current;
+    void updateMyPresence(
+      userUid,
+      isCurrentlyActive,
+      privateProfile.onlineStatusPrivacy
+    );
+  }, [userUid, privateProfile?.onlineStatusPrivacy]);
 
   // Global real-time listener for incoming WebRTC video calls across matches
   useEffect(() => {
@@ -538,8 +627,13 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   };
 
   const logout = async () => {
+    isMarkedOnlineRef.current = false;
     if (auth.currentUser) {
-      await updateMyPresence(auth.currentUser.uid, false).catch(() => {});
+      await updateMyPresence(
+        auth.currentUser.uid,
+        false,
+        onlinePrivacyRef.current
+      ).catch(() => {});
     }
     try {
       localStorage.removeItem('fyl_last_route');

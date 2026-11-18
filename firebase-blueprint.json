@@ -11,7 +11,8 @@
         "gender": { "type": "string", "enum": ["woman", "man", "non-binary", "prefer-not-to-say"] },
         "country": { "type": "string", "minLength": 2, "maxLength": 80 },
         "city": { "type": "string", "minLength": 1, "maxLength": 80 },
-        "photoUrl": { "type": "string", "minLength": 0, "maxLength": 1500 },
+        "photoUrl": { "type": "string", "minLength": 0, "maxLength": 140000 },
+        "coverUrl": { "type": "string", "minLength": 0, "maxLength": 240000 },
         "intention": { "type": "string", "enum": ["dating", "friendship", "both"] },
         "interests": { "type": "array" },
         "bio": { "type": "string", "minLength": 0, "maxLength": 600 },
@@ -104,6 +105,7 @@
         "dateOfBirth": { "type": "string", "minLength": 10, "maxLength": 10, "pattern": "^\\d{4}-\\d{2}-\\d{2}$" },
         "showAge": { "type": "boolean" },
         "allowFriendshipRequests": { "type": "boolean" },
+        "onlineStatusPrivacy": { "type": "string", "enum": ["everyone", "matches_only", "nobody"] },
         "createdAt": { "type": "string", "format": "date-time" },
         "updatedAt": { "type": "string", "format": "date-time" }
       },
@@ -139,9 +141,9 @@
         "uidA": { "type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
         "uidB": { "type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
         "userAName": { "type": "string", "minLength": 1, "maxLength": 60 },
-        "userAPhoto": { "type": "string", "minLength": 0, "maxLength": 1500 },
+        "userAPhoto": { "type": "string", "minLength": 0, "maxLength": 140000 },
         "userBName": { "type": "string", "minLength": 1, "maxLength": 60 },
-        "userBPhoto": { "type": "string", "minLength": 0, "maxLength": 1500 },
+        "userBPhoto": { "type": "string", "minLength": 0, "maxLength": 140000 },
         "lastMessageText": { "type": "string", "minLength": 0, "maxLength": 500 },
         "lastMessageAt": { "type": "string", "format": "date-time" },
         "lastSenderUid": { "type": "string", "minLength": 0, "maxLength": 128 },
@@ -171,17 +173,19 @@
     },
     "ChatMessage": {
       "title": "ChatMessage",
-      "description": "Real-time text, voice note, or attachment message inside a mutual match conversation.",
+      "description": "Real-time text, voice note, video message, or attachment inside a member conversation.",
       "type": "object",
       "properties": {
         "senderUid": { "type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
         "senderName": { "type": "string", "minLength": 1, "maxLength": 60 },
         "senderPhoto": { "type": "string", "minLength": 0, "maxLength": 1500 },
         "text": { "type": "string", "minLength": 0, "maxLength": 2000 },
-        "messageType": { "type": "string", "enum": ["text", "audio", "image", "file"] },
-        "audioUrl": { "type": "string", "minLength": 0, "maxLength": 1500 },
+        "messageType": { "type": "string", "enum": ["text", "audio", "video", "image", "file"] },
+        "audioUrl": { "type": "string", "minLength": 0, "maxLength": 500000 },
         "audioDurationSec": { "type": "integer" },
-        "attachmentUrl": { "type": "string", "minLength": 0, "maxLength": 1500 },
+        "videoUrl": { "type": "string", "minLength": 0, "maxLength": 750000 },
+        "videoDurationSec": { "type": "integer" },
+        "attachmentUrl": { "type": "string", "minLength": 0, "maxLength": 220000 },
         "attachmentName": { "type": "string", "minLength": 0, "maxLength": 200 },
         "attachmentMime": { "type": "string", "minLength": 0, "maxLength": 100 },
         "storagePath": { "type": "string", "minLength": 0, "maxLength": 300 },
@@ -198,6 +202,7 @@
       "properties": {
         "uid": { "type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
         "isOnline": { "type": "boolean" },
+        "privacyMode": { "type": "string", "enum": ["everyone", "matches_only", "nobody"] },
         "lastSeen": { "type": "string", "format": "date-time" },
         "updatedAt": { "type": "string", "format": "date-time" }
       },
@@ -205,10 +210,12 @@
     },
     "TypingStatus": {
       "title": "TypingStatus",
-      "description": "Ephemeral typing indicator inside an active mutual match chat.",
+      "description": "Real-time typing indicator state for an individual conversation in the typingStatus collection.",
       "type": "object",
       "properties": {
+        "matchId": { "type": "string", "minLength": 1, "maxLength": 260, "pattern": "^[a-zA-Z0-9_\\-]+$" },
         "uid": { "type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "recipientUid": { "type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
         "isTyping": { "type": "boolean" },
         "updatedAt": { "type": "string", "format": "date-time" }
       },
@@ -216,11 +223,12 @@
     },
     "CallSession": {
       "title": "CallSession",
-      "description": "WebRTC video call signaling session between matched members.",
+      "description": "WebRTC voice and video call signaling session between matched members.",
       "type": "object",
       "properties": {
         "callerUid": { "type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
         "calleeUid": { "type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "callType": { "type": "string", "enum": ["video", "audio"] },
         "status": { "type": "string", "enum": ["ringing", "active", "ended", "declined", "missed"] },
         "offerSdp": { "type": "string", "minLength": 0, "maxLength": 16000 },
         "answerSdp": { "type": "string", "minLength": 0, "maxLength": 16000 },
@@ -324,19 +332,23 @@
     },
     "/matches/{matchId}": {
       "schema": { "$ref": "#/entities/MatchRecord" },
-      "description": "Mutual matches keyed as sorted {uidA}_{uidB}."
+      "description": "Active member conversations (mutual matches and direct member chats) keyed as sorted {uidA}_{uidB}."
     },
     "/presence/{userId}": {
       "schema": { "$ref": "#/entities/PresenceStatus" },
-      "description": "Online/offline presence and last seen timestamps readable only by matched partners, owner, or admin."
+      "description": "Online/offline presence and last seen timestamps readable by signed-in members."
     },
     "/matches/{matchId}/messages/{messageId}": {
       "schema": { "$ref": "#/entities/ChatMessage" },
-      "description": "Real-time text, voice notes, and attachments between matched users."
+      "description": "Real-time text, voice notes, video messages, and attachments between conversation participants."
     },
     "/matches/{matchId}/typing/{userId}": {
       "schema": { "$ref": "#/entities/TypingStatus" },
-      "description": "Ephemeral typing indicator state per participant inside a match conversation."
+      "description": "Legacy ephemeral typing indicator state per participant inside a match conversation."
+    },
+    "/typingStatus/{typingId}": {
+      "schema": { "$ref": "#/entities/TypingStatus" },
+      "description": "Real-time typing status documents keyed as {matchId}_{uid} for active conversations."
     },
     "/matches/{matchId}/calls/{callId}": {
       "schema": { "$ref": "#/entities/CallSession" },

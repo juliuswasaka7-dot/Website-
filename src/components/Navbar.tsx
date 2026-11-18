@@ -15,6 +15,7 @@ import { useAuth } from '../context/AuthContext';
 import { useDataSaver } from '../context/DataSaverContext';
 import { copyUrlToClipboard, getPublicWebsiteUrl } from '../lib/share';
 import type { ViewRoute } from '../types/app';
+import { Avatar } from './Avatar';
 import { BrandLogo } from './BrandLogo';
 import { BlueTickBadge } from './MemberBadges';
 
@@ -75,10 +76,8 @@ export function Navbar({ currentRoute, onNavigate }: NavbarProps) {
           route: 'matches',
           label:
             totalUnreadMessages > 0
-              ? `Messages (${totalUnreadMessages})`
-              : matches.length > 0
-                ? `Matches (${matches.length})`
-                : 'Matches',
+              ? `Chat (${totalUnreadMessages})`
+              : 'Chat',
         },
         { route: 'premium', label: 'Membership' },
         { route: 'safety', label: 'Safety' },
@@ -187,8 +186,14 @@ export function Navbar({ currentRoute, onNavigate }: NavbarProps) {
               <button
                 type="button"
                 onClick={() => onNavigate('profile')}
-                className="min-h-[38px] px-2.5 sm:px-3.5 py-1.5 rounded-lg bg-[#2E1065] hover:bg-[#4C1D95] text-white text-xs sm:text-sm font-semibold transition-colors whitespace-nowrap shrink-0 inline-flex items-center gap-1.5"
+                className="min-h-[38px] pl-1.5 pr-2.5 sm:pr-3.5 py-1 rounded-lg bg-[#2E1065] hover:bg-[#4C1D95] text-white text-xs sm:text-sm font-semibold transition-colors whitespace-nowrap shrink-0 inline-flex items-center gap-1.5"
               >
+                <Avatar
+                  src={profile?.photoUrl}
+                  name={profile?.firstName || user.email || 'Member'}
+                  size="sm"
+                  className="!w-6 !h-6 text-[10px]"
+                />
                 <span className="max-w-[84px] sm:max-w-none truncate">
                   {profile?.firstName ? `${profile.firstName}'s Profile` : 'My Profile'}
                 </span>
